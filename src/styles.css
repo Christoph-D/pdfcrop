@@ -20,3 +20,16 @@ body {
   background: #2b2b2b;
   color: #e0e0e0;
 }
+
+.error-banner {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #5a1f1f;
+  color: #ffd6d6;
+  padding: 10px 16px;
+  border-radius: 6px;
+  z-index: 20;
+  max-width: 90vw;
+}

@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { loadPdf, PasswordRequiredError, InvalidPasswordError } from "@/lib/pdf/read";
-import { useLoadStore } from "@/store/loadStore";
+import { useWorkspaceStore } from "@/store/workspaceStore";
 import "./StartScreen.css";
 
 export default function StartScreen() {
-  const setSource = useLoadStore((s) => s.setSource);
-  const setError = useLoadStore((s) => s.setError);
+  const setSource = useWorkspaceStore((s) => s.setSource);
+  const setError = useWorkspaceStore((s) => s.setError);
   const [isDragging, setIsDragging] = useState(false);
   const [passwordFor, setPasswordFor] = useState<File | null>(null);
   const [passwordInput, setPasswordInput] = useState("");
@@ -53,11 +53,10 @@ export default function StartScreen() {
 
   const submitPassword = useCallback(async () => {
     if (!passwordFor) return;
+    const before = useWorkspaceStore.getState().source;
     await tryLoad(passwordFor, passwordInput);
-    if (useLoadStore.getState().source === null) {
-      // Still not loaded — keep modal open; error already set by tryLoad.
-      // The InvalidPasswordError branch will have updated passwordError.
-    } else {
+    const after = useWorkspaceStore.getState().source;
+    if (after && after !== before) {
       setPasswordFor(null);
       setPasswordInput("");
       setPasswordError(null);

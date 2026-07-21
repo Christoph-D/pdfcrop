@@ -18,6 +18,14 @@ export default function CroppingView() {
 
   return (
     <div className="cropping-view">
+      {status === "cropping" && (
+        <div className="cropping-view__overlay" role="status" aria-live="polite">
+          <div className="cropping-view__modal">
+            <div className="cropping-view__spinner" aria-hidden="true" />
+            <span className="cropping-view__modal-label">Cropping…</span>
+          </div>
+        </div>
+      )}
       <header className="cropping-view__header">
         <h1 className="cropping-view__title">{source.fileName}</h1>
         <span className="cropping-view__count">

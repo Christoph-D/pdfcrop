@@ -8,6 +8,7 @@ import {
   SELECTABLE_CORNER_DIMENSION,
   hasEnoughSpaceForHandles,
   type PixelRect,
+  ratiosToPixelRect,
 } from "@/lib/pdf/ratios";
 import {
   newRectId,
@@ -32,20 +33,6 @@ interface Props {
   cluster: Cluster;
   preview: GrayImage;
   previewUrl: string;
-}
-
-function ratiosToPixelRect(ratios: readonly [number, number, number, number], w: number, h: number): PixelRect {
-  const [left, bottom, right, top] = ratios;
-  const x1 = left * w;
-  const x2 = (1 - right) * w;
-  const y2 = (1 - top) * h;
-  const y1 = (1 - bottom) * h;
-  return {
-    x: Math.min(x1, x2),
-    y: Math.min(y1, y2),
-    w: Math.abs(x2 - x1),
-    h: Math.abs(y2 - y1),
-  };
 }
 
 function hitTest(rect: PixelRect, px: number, py: number, selected: boolean): Handle | null {

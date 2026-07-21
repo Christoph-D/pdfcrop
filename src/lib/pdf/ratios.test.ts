@@ -3,6 +3,7 @@ import {
   pixelRectToRatios,
   rotateRatios,
   ratiosToAbsoluteBox,
+  ratiosToPixelRect,
   clamp,
 } from "./ratios";
 
@@ -55,5 +56,27 @@ describe("ratiosToAbsoluteBox", () => {
     expect(box.y).toBeCloseTo(40); // 0.2 * 200
     expect(box.w).toBeCloseTo(80); // (1 - 0.2) * 100
     expect(box.h).toBeCloseTo(120); // (1 - 0.4) * 200
+  });
+});
+
+describe("ratiosToPixelRect", () => {
+  it("is the inverse of pixelRectToRatios for a centered rect", () => {
+    // 100x200 image, rect (10, 20, 80, 160) -> margins all 0.1
+    const original = { x: 10, y: 20, w: 80, h: 160 };
+    const ratios = pixelRectToRatios(original, 100, 200);
+    const back = ratiosToPixelRect(ratios, 100, 200);
+    expect(back.x).toBeCloseTo(original.x);
+    expect(back.y).toBeCloseTo(original.y);
+    expect(back.w).toBeCloseTo(original.w);
+    expect(back.h).toBeCloseTo(original.h);
+  });
+
+  it("places small autocrop-style margins as a near-full-size rect, not a sliver at the bottom", () => {
+    // Regression: previously this returned y≈0.95h, h≈0 due to swapped formulas.
+    const r = ratiosToPixelRect([0.05, 0.05, 0.05, 0.1], 100, 200);
+    expect(r.y).toBeCloseTo(20); // top * h = 0.1 * 200
+    expect(r.h).toBeCloseTo(170); // (1 - 0.05 - 0.1) * 200
+    expect(r.x).toBeCloseTo(5);
+    expect(r.w).toBeCloseTo(90);
   });
 });

@@ -27,9 +27,31 @@ export function pixelRectToRatios(rect: PixelRect, imgW: number, imgH: number): 
   const y2 = clamp(rect.y + rect.h, 0, imgH);
   const left = x1 / imgW;
   const right = 1 - x2 / imgW;
-  const top = 1 - (imgH - y1) / imgH;
+  const top = y1 / imgH;
   const bottom = (imgH - y2) / imgH;
   return [left, bottom, right, top];
+}
+
+/**
+ * Inverse of `pixelRectToRatios`. Converts PDF margin ratios back to a
+ * pixel-space rect in image (top-left origin) coordinates.
+ */
+export function ratiosToPixelRect(
+  ratios: Ratios,
+  imgW: number,
+  imgH: number,
+): PixelRect {
+  const [left, bottom, right, top] = ratios;
+  const x1 = left * imgW;
+  const x2 = (1 - right) * imgW;
+  const y1 = top * imgH;
+  const y2 = (1 - bottom) * imgH;
+  return {
+    x: Math.min(x1, x2),
+    y: Math.min(y1, y2),
+    w: Math.abs(x2 - x1),
+    h: Math.abs(y2 - y1),
+  };
 }
 
 export function clamp(v: number, lo: number, hi: number): number {

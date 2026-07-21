@@ -25,12 +25,18 @@ export interface CropOutput {
 
 /**
  * Apply user-drawn crop rectangles to the source PDF, producing a new cropped
- * PDF as a byte array. Port of DocumentCropper.crop (two-pass: page
- * multiplication followed by CropBox/MediaBox assignment).
+ * PDF as a byte array. Port of DocumentCropper.crop.
  *
- * Outlines are preserved only when every source page has exactly one crop rect
- * (no multiplication). Otherwise the outline is dropped because pdf-lib
- * cannot shift outline targets to follow multiplied pages.
+ * Two strategies:
+ *  - No multiplication (every page has ≤1 crop rect): the source document is
+ *    modified in place and saved. This preserves all catalog-level metadata
+ *    pdf-lib's `copyPages` cannot carry over — outlines/bookmarks, the Names
+ *    tree (named destinations the outline resolves to), PageLabels, and
+ *    OpenAction.
+ *  - Multiplication (some page has >1 crop rect): a fresh output document is
+ *    built by copying each source page N times, then assigning CropBox /
+ *    MediaBox. The outline tree is dropped in this case because pdf-lib
+ *    cannot shift outline destinations to follow multiplied pages.
  */
 export async function cropPdf(input: CropInput): Promise<CropOutput> {
   const { source, clusters, rectsByCluster, previews } = input;
@@ -73,18 +79,33 @@ export async function cropPdf(input: CropInput): Promise<CropOutput> {
   const srcDoc = await PDFDocument.load(source.data, {
     ignoreEncryption: true,
   });
+  srcDoc.setProducer("PDFCrop");
+  srcDoc.setCreator("PDFCrop");
+  if (!srcDoc.getTitle()) srcDoc.setTitle(source.fileName);
 
+  if (outlinePreserved) {
+    // In-place path: edit each page's CropBox/MediaBox on srcDoc. All
+    // catalog metadata (Outlines, Names, PageLabels, OpenAction) survives
+    // because we never leave the source document.
+    const pages = srcDoc.getPages();
+    for (let pn = 1; pn <= pages.length; pn++) {
+      const ratios = ratiosPerPage.get(pn)![0]!;
+      applyCrop(pages[pn - 1]!, ratios);
+    }
+    const bytes = await srcDoc.save({ useObjectStreams: true });
+    return { bytes, outlinePreserved: true, outputPageCount: pages.length };
+  }
+
+  // Multiplication path. Pass 1: copy each source page N times into a fresh
+  // output document (N = number of rects for that page). We track the output
+  // index of each copy so we can map ratios to copies in pass 2.
   const outDoc = await PDFDocument.create();
   outDoc.setProducer("PDFCrop");
   outDoc.setCreator("PDFCrop");
   outDoc.setTitle(srcDoc.getTitle() ?? source.fileName);
 
-  // Pass 1: multiply pages. Each source page is copied N times into the output
-  // (where N = number of rects for that page). We track the output index of
-  // the first copy of each source page so that we can map ratios to copies.
   const pages = srcDoc.getPages();
   let outputIndex = 0;
-  const firstCopyIndex = new Map<number, number>();
   const copyRects: Array<{ outputIndex: number; pageNumber: number; ratiosIndex: number }> = [];
   for (let pn = 1; pn <= pages.length; pn++) {
     const ratios = ratiosPerPage.get(pn)!;
@@ -92,53 +113,46 @@ export async function cropPdf(input: CropInput): Promise<CropOutput> {
     for (let r = 0; r < ratios.length; r++) {
       const copy = copied[0]!;
       outDoc.addPage(copy);
-      if (r === 0) firstCopyIndex.set(pn, outputIndex);
       copyRects.push({ outputIndex, pageNumber: pn, ratiosIndex: r });
       outputIndex++;
     }
   }
 
-  // Pass 2: set CropBox and MediaBox on each output page using the rotated,
-  // page-local rotation of the ratios and the original page's box dimensions.
+  // Pass 2: set CropBox and MediaBox on each output page.
   for (const { outputIndex, pageNumber, ratiosIndex } of copyRects) {
     const outPage = outDoc.getPages()[outputIndex]!;
-    const srcPage = pages[pageNumber - 1]!;
     const ratios = ratiosPerPage.get(pageNumber)![ratiosIndex]!;
-
-    // pdf-lib reports width/height already rotation-adjusted via
-    // getWidth/getHeight; the raw mediabox may be in pre-rotation space.
-    // Counter-rotate the ratios to align with the un-rotated mediabox.
-    const rotation = (((srcPage.getRotation().angle ?? 0) % 360) + 360) % 360 as 0 | 90 | 180 | 270;
-    const rotated = rotateRatios(ratios, rotation);
-
-    // Use the rotation-adjusted width/height as the basis box. This matches
-    // what the user sees in the preview and is consistent with pdf-lib's
-    // setCropBox / setMediaBox coordinate system on the rotated page.
-    const basisW = srcPage.getWidth();
-    const basisH = srcPage.getHeight();
-    const box = ratiosToAbsoluteBox(rotated, basisW, basisH);
-
-    outPage.setCropBox(box.x, box.y, box.w, box.h);
-    outPage.setMediaBox(box.x, box.y, box.w, box.h);
+    applyCrop(outPage, ratios);
   }
 
-  // Outline policy: keep only when no multiplication occurred.
-  if (!outlinePreserved) {
-    try {
-      // pdf-lib doesn't expose deleteOutlines directly; reach into the catalog.
-      const catalog = outDoc.catalog as unknown as { delete: (k: string) => void };
-      catalog.delete("Outlines");
-    } catch {
-      // some PDFs have no outline tree; ignore
-    }
+  // Outline policy: drop when multiplication occurred (destinations can no
+  // longer be remapped reliably).
+  try {
+    // pdf-lib doesn't expose deleteOutlines directly; reach into the catalog.
+    const catalog = outDoc.catalog as unknown as { delete: (k: string) => void };
+    catalog.delete("Outlines");
+  } catch {
+    // some PDFs have no outline tree; ignore
   }
 
   const bytes = await outDoc.save({ useObjectStreams: true });
-  return {
-    bytes,
-    outlinePreserved,
-    outputPageCount: outputIndex,
-  };
+  return { bytes, outlinePreserved: false, outputPageCount: outputIndex };
+}
+
+/**
+ * Set CropBox and MediaBox on a page from PDF margin ratios. Counter-rotates
+ * the ratios to align with the un-rotated mediabox, then uses the rotation-
+ * adjusted width/height as the basis box (matches what the user sees in the
+ * preview and is consistent with pdf-lib's box setters on rotated pages).
+ */
+function applyCrop(page: ReturnType<PDFDocument["getPages"]>[number], ratios: Ratios): void {
+  const rotation = (((page.getRotation().angle ?? 0) % 360) + 360) % 360 as 0 | 90 | 180 | 270;
+  const rotated = rotateRatios(ratios, rotation);
+  const basisW = page.getWidth();
+  const basisH = page.getHeight();
+  const box = ratiosToAbsoluteBox(rotated, basisW, basisH);
+  page.setCropBox(box.x, box.y, box.w, box.h);
+  page.setMediaBox(box.x, box.y, box.w, box.h);
 }
 
 /** Build a default output filename: <basename>_cropped.pdf */

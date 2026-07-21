@@ -75,6 +75,27 @@
   font-weight: 500;
 }
 
+.cropping-view__secondary {
+  background: transparent;
+  color: #ddd;
+  border: 1px solid #555;
+  padding: 8px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  margin-right: 80px;
+}
+
+.cropping-view__secondary:hover:not(:disabled) {
+  background: #3a3a3a;
+  border-color: #777;
+}
+
+.cropping-view__secondary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .cropping-view__primary:hover:not(:disabled) {
   background: #3a8ae5;
 }

@@ -12,7 +12,9 @@ export default function CroppingView() {
   const error = useWorkspaceStore((s) => s.error);
   const lastCrop = useWorkspaceStore((s) => s.lastCrop);
   const cropAndSave = useWorkspaceStore((s) => s.cropAndSave);
+  const reset = useWorkspaceStore((s) => s.reset);
   const syncSizes = useCropStore((s) => s.syncSizes);
+  const clearAll = useCropStore((s) => s.clearAll);
   const setSyncSizes = useCropStore((s) => s.setSyncSizes);
   const propagateSizeFromRect = useCropStore((s) => s.propagateSizeFromRect);
   const [outlineDismissed, setOutlineDismissed] = useState(false);
@@ -79,6 +81,17 @@ export default function CroppingView() {
           Synchronize sizes
         </label>
         <div className="cropping-view__spacer" />
+        <button
+          type="button"
+          className="cropping-view__secondary"
+          disabled={status === "cropping"}
+          onClick={() => {
+            clearAll();
+            reset();
+          }}
+        >
+          Load new PDF
+        </button>
         <button
           type="button"
           className="cropping-view__primary"

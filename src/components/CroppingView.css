@@ -136,7 +136,7 @@
 
 .cluster-panel {
   flex: 1 1 240px;
-  max-width: 480px;
+  max-width: var(--fit-width, 600px);
   min-width: 200px;
 }
 

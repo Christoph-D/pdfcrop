@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import type { Cluster } from "@/lib/pdf/cluster";
 import type { GrayImage } from "@/lib/pdf/overlay";
 import { getAutoCropRatios } from "@/lib/pdf/autocrop";
@@ -316,7 +316,14 @@ export default function ClusterPanel({ cluster, preview, previewUrl }: Props) {
   const cursor = cursorFor(hoverHandle);
 
   return (
-    <div className="cluster-panel">
+    <div
+      className="cluster-panel"
+      style={
+        {
+          "--fit-width": `calc((100vh - 120px) * ${imgW} / ${imgH})`,
+        } as CSSProperties
+      }
+    >
       <svg
         ref={svgRef}
         className="cluster-panel__svg"

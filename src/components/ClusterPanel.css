@@ -1,0 +1,22 @@
+.cluster-panel {
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  padding: 4px;
+}
+
+.cluster-panel__svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-width: 100%;
+  user-select: none;
+  touch-action: none;
+}
+
+.cluster-panel__meta {
+  font-size: 11px;
+  color: #333;
+  padding: 4px 6px;
+}

@@ -1,4 +1,5 @@
 import { useWorkspaceStore } from "@/store/workspaceStore";
+import ClusterPanel from "@/components/ClusterPanel";
 import "./CroppingView.css";
 
 export default function CroppingView() {
@@ -17,26 +18,20 @@ export default function CroppingView() {
       <div className="cropping-view__grid">
         {clusters.map((cluster) => {
           const preview = previews.find((p) => p.clusterId === cluster.id);
+          if (!preview) {
+            return (
+              <div key={cluster.id} className="cluster-card">
+                <div className="cluster-card__placeholder">…</div>
+              </div>
+            );
+          }
           return (
-            <div key={cluster.id} className="cluster-card">
-              <div className="cluster-card__image">
-                {preview && preview.previewUrl ? (
-                  <img
-                    src={preview.previewUrl}
-                    alt={`${cluster.parity} pages preview`}
-                  />
-                ) : (
-                  <div className="cluster-card__placeholder">…</div>
-                )}
-              </div>
-              <div className="cluster-card__meta">
-                <strong>{cluster.parity === "odd" ? "Odd" : "Even"}</strong>
-                {" · "}
-                {cluster.allPages.length} pages
-                {" · "}
-                {cluster.width.toFixed(0)} × {cluster.height.toFixed(0)}
-              </div>
-            </div>
+            <ClusterPanel
+              key={cluster.id}
+              cluster={cluster}
+              preview={preview.preview}
+              previewUrl={preview.previewUrl}
+            />
           );
         })}
       </div>

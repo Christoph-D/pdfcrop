@@ -38,8 +38,11 @@ export async function loadPdf(
 ): Promise<PdfSource> {
   let doc: pdfjsLib.PDFDocumentProxy;
   try {
+    // pdf.js transfers (and detaches) the ArrayBuffer it receives into its
+    // worker. Give it a copy so the caller's buffer remains usable for later
+    // rendering/cropping passes.
     doc = await pdfjsLib.getDocument({
-      data,
+      data: data.slice(0),
       password,
       isEvalSupported: false,
     }).promise;

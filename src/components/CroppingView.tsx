@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useWorkspaceStore } from "@/store/workspaceStore";
+import { useCropStore } from "@/store/cropStore";
 import ClusterPanel from "@/components/ClusterPanel";
 import "./CroppingView.css";
 
@@ -11,10 +12,45 @@ export default function CroppingView() {
   const error = useWorkspaceStore((s) => s.error);
   const lastCrop = useWorkspaceStore((s) => s.lastCrop);
   const cropAndSave = useWorkspaceStore((s) => s.cropAndSave);
+  const syncSizes = useCropStore((s) => s.syncSizes);
+  const setSyncSizes = useCropStore((s) => s.setSyncSizes);
+  const propagateSizeFromRect = useCropStore((s) => s.propagateSizeFromRect);
   const [outlineDismissed, setOutlineDismissed] = useState(false);
 
   const showOutlineWarning =
     lastCrop && !lastCrop.outlinePreserved && !outlineDismissed;
+
+  const dimsByCluster = useMemo(() => {
+    const map: Record<string, { imgW: number; imgH: number }> = {};
+    for (const p of previews) {
+      map[p.clusterId] = { imgW: p.preview.width, imgH: p.preview.height };
+    }
+    return map;
+  }, [previews]);
+
+  const toggleSync = (v: boolean) => {
+    setSyncSizes(v);
+    if (!v) return;
+    const state = useCropStore.getState();
+    let sourceClusterId: string | null = state.selectedClusterId;
+    let sourceRectId: string | null = state.selectedRectId;
+    const hasValidSelection =
+      sourceClusterId &&
+      sourceRectId &&
+      state.rectsByCluster[sourceClusterId]?.some((r) => r.id === sourceRectId);
+    if (!hasValidSelection) {
+      for (const [cid, list] of Object.entries(state.rectsByCluster)) {
+        if (list.length) {
+          sourceClusterId = cid;
+          sourceRectId = list[0]!.id;
+          break;
+        }
+      }
+    }
+    if (sourceClusterId && sourceRectId) {
+      propagateSizeFromRect(sourceClusterId, sourceRectId, dimsByCluster);
+    }
+  };
 
   return (
     <div className="cropping-view">
@@ -31,6 +67,14 @@ export default function CroppingView() {
         <span className="cropping-view__count">
           {clusters.length} clusters · {source.pages.length} pages
         </span>
+        <label className="cropping-view__sync">
+          <input
+            type="checkbox"
+            checked={syncSizes}
+            onChange={(e) => toggleSync(e.target.checked)}
+          />
+          Synchronize sizes
+        </label>
         <div className="cropping-view__spacer" />
         <button
           type="button"

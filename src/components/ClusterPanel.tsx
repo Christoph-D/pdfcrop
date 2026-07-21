@@ -10,6 +10,7 @@ import {
   type PixelRect,
   ratiosToPixelRect,
 } from "@/lib/pdf/ratios";
+import { useWorkspaceStore } from "@/store/workspaceStore";
 import {
   newRectId,
   useCropStore,
@@ -85,10 +86,12 @@ export default function ClusterPanel({ cluster, preview, previewUrl }: Props) {
   const rects = useCropStore((s) => s.rectsByCluster[cluster.id] ?? []);
   const selectedRectId = useCropStore((s) => s.selectedRectId);
   const selectedClusterId = useCropStore((s) => s.selectedClusterId);
+  const syncSizes = useCropStore((s) => s.syncSizes);
   const addRect = useCropStore((s) => s.addRect);
   const updateRect = useCropStore((s) => s.updateRect);
   const removeRect = useCropStore((s) => s.removeRect);
   const select = useCropStore((s) => s.select);
+  const propagateSizeFromRect = useCropStore((s) => s.propagateSizeFromRect);
 
   const svgRef = useRef<SVGSVGElement>(null);
   const dragState = useRef<{
@@ -266,8 +269,24 @@ export default function ClusterPanel({ cluster, preview, previewUrl }: Props) {
         }
       }
       if (state.rectId) updateRect(cluster.id, state.rectId, patch);
+      if (
+        syncSizes &&
+        state.handle !== "draw" &&
+        state.handle !== "move" &&
+        state.rectId &&
+        ("w" in patch || "h" in patch)
+      ) {
+        const dimsByCluster: Record<string, { imgW: number; imgH: number }> = {};
+        for (const p of useWorkspaceStore.getState().previews) {
+          dimsByCluster[p.clusterId] = {
+            imgW: p.preview.width,
+            imgH: p.preview.height,
+          };
+        }
+        propagateSizeFromRect(cluster.id, state.rectId, dimsByCluster);
+      }
     },
-    [cluster.id, imgH, imgW, rects, selectedClusterId, selectedRectId, toImageCoords, updateRect],
+    [cluster.id, imgH, imgW, propagateSizeFromRect, rects, selectedClusterId, selectedRectId, syncSizes, toImageCoords, updateRect],
   );
 
   const endDrag = useCallback(

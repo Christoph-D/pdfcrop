@@ -124,6 +124,20 @@
   font-size: 13px;
 }
 
+.cropping-view__sync {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #ddd;
+  font-size: 13px;
+  user-select: none;
+  cursor: pointer;
+}
+
+.cropping-view__sync input {
+  cursor: pointer;
+}
+
 .cropping-view__grid {
   display: flex;
   flex-wrap: wrap;

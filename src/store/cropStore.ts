@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { PixelRect } from "@/lib/pdf/ratios";
+import { clamp, type PixelRect } from "@/lib/pdf/ratios";
 
 export interface CropRect extends PixelRect {
   id: string;
@@ -9,16 +9,28 @@ interface ClusterCrops {
   [clusterId: string]: CropRect[];
 }
 
+export interface ClusterDims {
+  imgW: number;
+  imgH: number;
+}
+
 interface CropState {
   rectsByCluster: ClusterCrops;
   selectedClusterId: string | null;
   selectedRectId: string | null;
+  syncSizes: boolean;
   setRects: (clusterId: string, rects: CropRect[]) => void;
   addRect: (clusterId: string, rect: CropRect) => void;
   updateRect: (clusterId: string, rectId: string, patch: Partial<CropRect>) => void;
   removeRect: (clusterId: string, rectId: string) => void;
   select: (clusterId: string | null, rectId: string | null) => void;
   clearAll: () => void;
+  setSyncSizes: (v: boolean) => void;
+  propagateSizeFromRect: (
+    sourceClusterId: string,
+    sourceRectId: string,
+    dimsByCluster: Record<string, ClusterDims>,
+  ) => void;
 }
 
 let nextId = 1;
@@ -30,6 +42,7 @@ export const useCropStore = create<CropState>((set) => ({
   rectsByCluster: {},
   selectedClusterId: null,
   selectedRectId: null,
+  syncSizes: false,
   setRects: (clusterId, rects) =>
     set((s) => ({
       rectsByCluster: { ...s.rectsByCluster, [clusterId]: rects },
@@ -71,5 +84,45 @@ export const useCropStore = create<CropState>((set) => ({
   select: (clusterId, rectId) =>
     set({ selectedClusterId: clusterId, selectedRectId: rectId }),
   clearAll: () =>
-    set({ rectsByCluster: {}, selectedClusterId: null, selectedRectId: null }),
+    set({
+      rectsByCluster: {},
+      selectedClusterId: null,
+      selectedRectId: null,
+      syncSizes: false,
+    }),
+  setSyncSizes: (v) => set({ syncSizes: v }),
+  propagateSizeFromRect: (sourceClusterId, sourceRectId, dimsByCluster) =>
+    set((s) => {
+      const sourceList = s.rectsByCluster[sourceClusterId] ?? [];
+      const sourceRect = sourceList.find((r) => r.id === sourceRectId);
+      const sourceDims = dimsByCluster[sourceClusterId];
+      if (!sourceRect || !sourceDims || sourceDims.imgW <= 0 || sourceDims.imgH <= 0) {
+        return {};
+      }
+      const wRatio = sourceRect.w / sourceDims.imgW;
+      const hRatio = sourceRect.h / sourceDims.imgH;
+      const newRectsByCluster: ClusterCrops = {};
+      for (const [cid, list] of Object.entries(s.rectsByCluster)) {
+        const dims = dimsByCluster[cid];
+        if (!dims) {
+          newRectsByCluster[cid] = list;
+          continue;
+        }
+        const newW = wRatio * dims.imgW;
+        const newH = hRatio * dims.imgH;
+        const maxX = Math.max(0, dims.imgW - newW);
+        const maxY = Math.max(0, dims.imgH - newH);
+        newRectsByCluster[cid] = list.map((r) => {
+          if (cid === sourceClusterId && r.id === sourceRectId) return r;
+          return {
+            ...r,
+            x: clamp(r.x, 0, maxX),
+            y: clamp(r.y, 0, maxY),
+            w: newW,
+            h: newH,
+          };
+        });
+      }
+      return { rectsByCluster: newRectsByCluster };
+    }),
 }));

@@ -88,6 +88,13 @@
   padding: 8px;
   background: rgb(186, 186, 186);
   min-height: calc(100% - 50px);
+  align-items: flex-start;
+}
+
+.cluster-panel {
+  flex: 1 1 240px;
+  max-width: 480px;
+  min-width: 200px;
 }
 
 .cluster-card {

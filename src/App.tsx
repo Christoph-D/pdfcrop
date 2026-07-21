@@ -5,13 +5,12 @@ import { useWorkspaceStore } from "@/store/workspaceStore";
 import StartScreen from "@/components/StartScreen";
 import CroppingView from "@/components/CroppingView";
 import ProgressBar from "@/components/ProgressBar";
+import ErrorBanner from "@/components/ErrorBanner";
 
 export default function App() {
   const source = useWorkspaceStore((s) => s.source);
   const password = useWorkspaceStore((s) => s.password);
   const status = useWorkspaceStore((s) => s.status);
-  const error = useWorkspaceStore((s) => s.error);
-  const setSource = useWorkspaceStore((s) => s.setSource);
   const setClusters = useWorkspaceStore((s) => s.setClusters);
   const setStatus = useWorkspaceStore((s) => s.setStatus);
   const setPreviews = useWorkspaceStore((s) => s.setPreviews);
@@ -55,23 +54,19 @@ export default function App() {
     setPreviews,
     setProgress,
     setError,
-    setSource,
   ]);
 
   if (status === "ready" && source) {
     return <CroppingView />;
   }
 
+  const isBusy = status === "clustering" || status === "rendering";
+
   return (
     <>
-      {(status === "clustering" || status === "rendering") && (
-        <ProgressBar />
-      )}
-      {error && (
-        <div className="error-banner">{error}</div>
-      )}
-      {status === "error" && <StartScreen />}
-      {status === "idle" && <StartScreen />}
+      <ErrorBanner />
+      {isBusy && <ProgressBar />}
+      {status !== "error" && <StartScreen />}
     </>
   );
 }

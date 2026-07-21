@@ -14,6 +14,15 @@ export interface ClusterDims {
   imgH: number;
 }
 
+/**
+ * Which edges of a rect stay fixed when its size changes during sync
+ * propagation. Mirrors the corner/edge the user dragged on the source.
+ */
+export interface SizeAnchor {
+  fixedLeft: boolean;
+  fixedTop: boolean;
+}
+
 interface CropState {
   rectsByCluster: ClusterCrops;
   selectedClusterId: string | null;
@@ -30,6 +39,7 @@ interface CropState {
     sourceClusterId: string,
     sourceRectId: string,
     dimsByCluster: Record<string, ClusterDims>,
+    anchor: SizeAnchor,
   ) => void;
 }
 
@@ -91,7 +101,7 @@ export const useCropStore = create<CropState>((set) => ({
       syncSizes: false,
     }),
   setSyncSizes: (v) => set({ syncSizes: v }),
-  propagateSizeFromRect: (sourceClusterId, sourceRectId, dimsByCluster) =>
+  propagateSizeFromRect: (sourceClusterId, sourceRectId, dimsByCluster, anchor) =>
     set((s) => {
       const sourceList = s.rectsByCluster[sourceClusterId] ?? [];
       const sourceRect = sourceList.find((r) => r.id === sourceRectId);
@@ -101,6 +111,7 @@ export const useCropStore = create<CropState>((set) => ({
       }
       const wRatio = sourceRect.w / sourceDims.imgW;
       const hRatio = sourceRect.h / sourceDims.imgH;
+      const { fixedLeft, fixedTop } = anchor;
       const newRectsByCluster: ClusterCrops = {};
       for (const [cid, list] of Object.entries(s.rectsByCluster)) {
         const dims = dimsByCluster[cid];
@@ -114,10 +125,12 @@ export const useCropStore = create<CropState>((set) => ({
         const maxY = Math.max(0, dims.imgH - newH);
         newRectsByCluster[cid] = list.map((r) => {
           if (cid === sourceClusterId && r.id === sourceRectId) return r;
+          const rawX = fixedLeft ? r.x : r.x + r.w - newW;
+          const rawY = fixedTop ? r.y : r.y + r.h - newH;
           return {
             ...r,
-            x: clamp(r.x, 0, maxX),
-            y: clamp(r.y, 0, maxY),
+            x: clamp(rawX, 0, maxX),
+            y: clamp(rawY, 0, maxY),
             w: newW,
             h: newH,
           };

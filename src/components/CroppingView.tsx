@@ -48,7 +48,10 @@ export default function CroppingView() {
       }
     }
     if (sourceClusterId && sourceRectId) {
-      propagateSizeFromRect(sourceClusterId, sourceRectId, dimsByCluster);
+      propagateSizeFromRect(sourceClusterId, sourceRectId, dimsByCluster, {
+        fixedLeft: true,
+        fixedTop: true,
+      });
     }
   };
 

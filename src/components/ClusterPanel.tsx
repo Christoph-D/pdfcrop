@@ -15,6 +15,7 @@ import {
   newRectId,
   useCropStore,
   type CropRect,
+  type SizeAnchor,
 } from "@/store/cropStore";
 import "./ClusterPanel.css";
 
@@ -77,6 +78,32 @@ function cursorFor(handle: Handle | null): string {
       return "crosshair";
     default:
       return "crosshair";
+  }
+}
+
+/**
+ * Which edges of a rect stay fixed when its size changes, mirroring the
+ * corner/edge the user dragged. For edge handles the perpendicular axis is
+ * unchanged, so its anchor flag is irrelevant (defaults to fixed).
+ */
+function anchorForHandle(handle: Handle): SizeAnchor {
+  switch (handle) {
+    case "nw":
+      return { fixedLeft: false, fixedTop: false };
+    case "ne":
+      return { fixedLeft: true, fixedTop: false };
+    case "sw":
+      return { fixedLeft: false, fixedTop: true };
+    case "se":
+    case "edge-e":
+    case "edge-s":
+      return { fixedLeft: true, fixedTop: true };
+    case "edge-n":
+      return { fixedLeft: true, fixedTop: false };
+    case "edge-w":
+      return { fixedLeft: false, fixedTop: true };
+    default:
+      return { fixedLeft: true, fixedTop: true };
   }
 }
 
@@ -283,7 +310,12 @@ export default function ClusterPanel({ cluster, preview, previewUrl }: Props) {
             imgH: p.preview.height,
           };
         }
-        propagateSizeFromRect(cluster.id, state.rectId, dimsByCluster);
+        propagateSizeFromRect(
+          cluster.id,
+          state.rectId,
+          dimsByCluster,
+          anchorForHandle(state.handle),
+        );
       }
     },
     [cluster.id, imgH, imgW, propagateSizeFromRect, rects, selectedClusterId, selectedRectId, syncSizes, toImageCoords, updateRect],

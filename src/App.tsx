@@ -56,7 +56,7 @@ export default function App() {
     setError,
   ]);
 
-  if (source && (status === "ready" || status === "cropping")) {
+  if (source && (status === "ready" || status === "cropping" || status === "error")) {
     return <CroppingView />;
   }
 

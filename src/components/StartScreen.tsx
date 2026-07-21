@@ -1,78 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { loadPdf, PasswordRequiredError, InvalidPasswordError } from "@/lib/pdf/read";
-import { useWorkspaceStore } from "@/store/workspaceStore";
+import { useRef, useState } from "react";
+import { usePdfLoader } from "@/hooks/usePdfLoader";
 import "./StartScreen.css";
 
 export default function StartScreen() {
-  const setSource = useWorkspaceStore((s) => s.setSource);
-  const setError = useWorkspaceStore((s) => s.setError);
+  const { isLoading, handleFile, passwordModal } = usePdfLoader();
   const [isDragging, setIsDragging] = useState(false);
-  const [passwordFor, setPasswordFor] = useState<File | null>(null);
-  const [passwordInput, setPasswordInput] = useState("");
-  const [passwordError, setPasswordError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
   const dragDepth = useRef(0);
-
-  const tryLoad = useCallback(
-    async (file: File, password?: string) => {
-      setIsLoading(true);
-      try {
-        const buf = await file.arrayBuffer();
-        const src = await loadPdf(buf, file.name, password);
-        setSource(src, password ?? null);
-      } catch (err) {
-        if (err instanceof PasswordRequiredError) {
-          setPasswordFor(file);
-          setPasswordInput("");
-          setPasswordError(null);
-        } else if (err instanceof InvalidPasswordError) {
-          setPasswordFor(file);
-          setPasswordError("Incorrect password, please try again.");
-          setPasswordInput("");
-        } else {
-          setError(err instanceof Error ? err.message : String(err));
-        }
-      } finally {
-        setIsLoading(false);
-      }
-    },
-    [setSource, setError],
-  );
-
-  const handleFile = useCallback(
-    (file: File | undefined | null) => {
-      if (!file) return;
-      if (!file.name.toLowerCase().endsWith(".pdf")) {
-        setError("Please choose a .pdf file.");
-        return;
-      }
-      void tryLoad(file);
-    },
-    [tryLoad, setError],
-  );
-
-  const submitPassword = useCallback(async () => {
-    if (!passwordFor) return;
-    const before = useWorkspaceStore.getState().source;
-    await tryLoad(passwordFor, passwordInput);
-    const after = useWorkspaceStore.getState().source;
-    if (after && after !== before) {
-      setPasswordFor(null);
-      setPasswordInput("");
-      setPasswordError(null);
-    }
-  }, [passwordFor, passwordInput, tryLoad]);
-
-  useEffect(() => {
-    if (!passwordFor) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setPasswordFor(null);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [passwordFor]);
 
   return (
     <div
@@ -112,49 +45,7 @@ export default function StartScreen() {
         {isLoading && <p className="drop-zone__loading">Loading…</p>}
       </div>
 
-      {passwordFor && (
-        <div className="modal-backdrop">
-          <div className="modal">
-            <h2>Password required</h2>
-            <p>
-              <code>{passwordFor.name}</code> is password protected.
-            </p>
-            {passwordError && <p className="modal__error">{passwordError}</p>}
-            <input
-              type="password"
-              autoFocus
-              value={passwordInput}
-              onChange={(e) => setPasswordInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") void submitPassword();
-              }}
-              placeholder="Password"
-              className="modal__input"
-            />
-            <div className="modal__actions">
-              <button
-                type="button"
-                className="modal__cancel"
-                onClick={() => {
-                  setPasswordFor(null);
-                  setPasswordInput("");
-                  setPasswordError(null);
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="modal__ok"
-                onClick={() => void submitPassword()}
-                disabled={!passwordInput}
-              >
-                Unlock
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {passwordModal}
     </div>
   );
 }

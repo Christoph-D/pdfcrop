@@ -1,6 +1,7 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useWorkspaceStore } from "@/store/workspaceStore";
 import { useCropStore } from "@/store/cropStore";
+import { usePdfLoader } from "@/hooks/usePdfLoader";
 import ClusterPanel from "@/components/ClusterPanel";
 import "./CroppingView.css";
 
@@ -12,12 +13,14 @@ export default function CroppingView() {
   const error = useWorkspaceStore((s) => s.error);
   const lastCrop = useWorkspaceStore((s) => s.lastCrop);
   const cropAndSave = useWorkspaceStore((s) => s.cropAndSave);
-  const reset = useWorkspaceStore((s) => s.reset);
   const syncSizes = useCropStore((s) => s.syncSizes);
-  const clearAll = useCropStore((s) => s.clearAll);
   const setSyncSizes = useCropStore((s) => s.setSyncSizes);
   const propagateSizeFromRect = useCropStore((s) => s.propagateSizeFromRect);
+  const { handleFile, passwordModal } = usePdfLoader();
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [outlineDismissed, setOutlineDismissed] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const dragDepth = useRef(0);
 
   const showOutlineWarning =
     lastCrop && !lastCrop.outlinePreserved && !outlineDismissed;
@@ -58,7 +61,41 @@ export default function CroppingView() {
   };
 
   return (
-    <div className="cropping-view">
+    <div
+      className="cropping-view"
+      onDragEnter={(e) => {
+        e.preventDefault();
+        dragDepth.current += 1;
+        setIsDragging(true);
+      }}
+      onDragOver={(e) => e.preventDefault()}
+      onDragLeave={(e) => {
+        e.preventDefault();
+        dragDepth.current -= 1;
+        if (dragDepth.current <= 0) setIsDragging(false);
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        dragDepth.current = 0;
+        setIsDragging(false);
+        handleFile(e.dataTransfer.files[0]);
+      }}
+    >
+      <input
+        type="file"
+        accept="application/pdf,.pdf"
+        hidden
+        ref={fileInputRef}
+        onChange={(e) => {
+          handleFile(e.target.files?.[0]);
+          e.target.value = "";
+        }}
+      />
+      {isDragging && (
+        <div className="cropping-view__drop-overlay" aria-hidden="true">
+          <span className="cropping-view__drop-message">Drop PDF to load</span>
+        </div>
+      )}
       {status === "cropping" && (
         <div className="cropping-view__overlay" role="status" aria-live="polite">
           <div className="cropping-view__modal">
@@ -85,10 +122,7 @@ export default function CroppingView() {
           type="button"
           className="cropping-view__secondary"
           disabled={status === "cropping"}
-          onClick={() => {
-            clearAll();
-            reset();
-          }}
+          onClick={() => fileInputRef.current?.click()}
         >
           Load new PDF
         </button>
@@ -133,6 +167,8 @@ export default function CroppingView() {
           );
         })}
       </div>
+
+      {passwordModal}
     </div>
   );
 }

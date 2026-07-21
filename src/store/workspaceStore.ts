@@ -43,8 +43,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   progressTotal: 0,
   error: null,
   lastCrop: null,
-  setSource: (source, password) =>
-    set({ source, password, status: "clustering", error: null }),
+  setSource: (source, password) => {
+    useCropStore.getState().clearAll();
+    set({ source, password, status: "clustering", error: null });
+  },
   setClusters: (clusters) => set({ clusters }),
   setPreviews: (previews) => set({ previews, status: "ready" }),
   setStatus: (status) => set({ status }),

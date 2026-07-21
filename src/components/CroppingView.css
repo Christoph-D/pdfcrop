@@ -6,6 +6,27 @@
   position: relative;
 }
 
+.cropping-view__drop-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(74, 158, 255, 0.15);
+  border: 3px dashed #4a9eff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 20;
+  pointer-events: none;
+}
+
+.cropping-view__drop-message {
+  background: #1f1f1f;
+  color: #fff;
+  padding: 16px 28px;
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: 500;
+}
+
 .cropping-view__overlay {
   position: fixed;
   inset: 0;

@@ -89,20 +89,9 @@ export interface OverlayResult {
   preview: GrayImage;
 }
 
-const docCache = new Map<string, pdfjsLib.PDFDocumentProxy>();
-
-async function getDoc(key: string, data: ArrayBuffer | Uint8Array, password?: string) {
-  let doc = docCache.get(key);
-  if (doc) return doc;
-  doc = await pdfjsLib.getDocument({ data, password, ...getDocDefaults }).promise;
-  docCache.set(key, doc);
-  return doc;
-}
-
 async function renderPage(req: RenderRequest): Promise<RenderedPage> {
   const targetHeight = req.targetHeight ?? MAX_PAGE_HEIGHT;
-  const docKey = `doc-${req.data.byteLength}`;
-  const doc = await getDoc(docKey, req.data, req.password);
+  const doc = await pdfjsLib.getDocument({ data: req.data, password: req.password, ...getDocDefaults }).promise;
   const page = await doc.getPage(req.pageNumber);
   const baseViewport = page.getViewport({ scale: 1 });
   const scale = targetHeight / baseViewport.height;
@@ -123,7 +112,7 @@ async function renderPage(req: RenderRequest): Promise<RenderedPage> {
   for (let i = 0, j = 0; i < img.data.length; i += 4, j++) {
     gray[j] = (img.data[i]! * 0.299 + img.data[i + 1]! * 0.587 + img.data[i + 2]! * 0.114) | 0;
   }
-  page.cleanup();
+  await doc.destroy();
   return { pageNumber: req.pageNumber, image: { width, height, data: gray } };
 }
 
@@ -133,12 +122,7 @@ async function computeClusterOverlay(clusterId: string, pages: RenderedPage[]): 
   return { clusterId, preview };
 }
 
-async function dispose(): Promise<void> {
-  for (const doc of docCache.values()) await doc.destroy();
-  docCache.clear();
-}
-
-const api = { renderPage, computeClusterOverlay, dispose };
+const api = { renderPage, computeClusterOverlay };
 Comlink.expose(api);
 
 export type PdfWorkerApi = typeof api;

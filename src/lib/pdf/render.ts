@@ -76,7 +76,6 @@ export async function renderClusterPreviews(
     }),
   );
 
-  void worker.dispose();
   terminate();
   return previews;
 }

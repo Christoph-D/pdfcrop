@@ -8,3 +8,8 @@ tsconfig.tsbuildinfo
 .tmp
 .pnpm-store/
 package-lock.json
+
+# Playwright
+/test-results/
+/playwright-report/
+/playwright/.cache/

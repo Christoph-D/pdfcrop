@@ -15,6 +15,9 @@ full description.
 - **Heavy work** (rasterization, preview merging) runs in a Web Worker via
   [`comlink`](https://github.com/GoogleChromeLabs/comlink): `src/workers/pdf.worker.ts`.
 - **Tests:** Vitest, co-located as `*.test.ts` next to the code under test.
+- **End-to-end tests:** Playwright, in `e2e/`. `pnpm test:e2e` boots the Vite dev server and drives the real UI; it
+  feeds `e2e/fixtures/sample.pdf` (regenerate with `pnpm gen:fixture`). E2E is **not** part of `pnpm check` — run it
+  separately (first time: `pnpm exec playwright install chromium`).
 
 ### Key source layout
 

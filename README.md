@@ -38,14 +38,30 @@ Then open the URL Vite prints (typically `http://localhost:5173`).
 
 ### Other scripts
 
-| Script            | Purpose                                             |
-| ----------------- | --------------------------------------------------- |
-| `pnpm build`      | Type-check and produce a static build in `dist/`.   |
-| `pnpm preview`    | Serve the built `dist/` locally for a sanity check. |
-| `pnpm lint`       | Run ESLint.                                         |
-| `pnpm typecheck`  | Run `tsc --noEmit`.                                 |
-| `pnpm test`       | Run the unit tests once (`vitest run`).             |
-| `pnpm test:watch` | Run vitest in watch mode.                           |
+| Script             | Purpose                                             |
+| ------------------ | --------------------------------------------------- |
+| `pnpm build`       | Type-check and produce a static build in `dist/`.   |
+| `pnpm preview`     | Serve the built `dist/` locally for a sanity check. |
+| `pnpm lint`        | Run ESLint.                                         |
+| `pnpm typecheck`   | Run `tsc --noEmit`.                                 |
+| `pnpm test`        | Run the unit tests once (`vitest run`).             |
+| `pnpm test:watch`  | Run vitest in watch mode.                           |
+| `pnpm test:e2e`    | Run the Playwright end-to-end tests (see below).    |
+| `pnpm gen:fixture` | Regenerate the e2e fixture PDF.                     |
+
+### End-to-end tests
+
+Browser end-to-end tests live in `e2e/` and run with [Playwright](https://playwright.dev). They boot the Vite dev server
+automatically, drive the real UI, and check the full drop → cluster → crop → download flow.
+
+```bash
+pnpm install              # if you haven't already
+pnpm exec playwright install chromium   # one-time browser download
+pnpm test:e2e
+```
+
+The test feeds a tiny fixture PDF (`e2e/fixtures/sample.pdf`). Regenerate it with `pnpm gen:fixture` if you change the
+fixture generator (`e2e/fixtures/make-pdf.mjs`).
 
 ## How to deploy it
 

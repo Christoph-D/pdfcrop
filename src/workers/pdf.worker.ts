@@ -5,11 +5,7 @@ import * as pdfjsLib from "pdfjs-dist";
 // pdf.js run in-thread inside this Comlink worker (see `_setupFakeWorkerGlobal`
 // + `disableWorker` below) without needing a `workerSrc`.
 import "pdfjs-dist/build/pdf.worker.mjs";
-import {
-  calculateOverlay,
-  type GrayImage,
-  MAX_PAGE_HEIGHT,
-} from "@/lib/pdf/overlay";
+import { calculateOverlay, type GrayImage, MAX_PAGE_HEIGHT } from "@/lib/pdf/overlay";
 
 // pdf.js inside a worker: disable its own nested worker, run in-thread.
 // `document` is undefined here, so pdf.js's default DOMCanvasFactory /
@@ -32,11 +28,7 @@ class WorkerCanvasFactory {
       context: canvas.getContext("2d", { willReadFrequently: true }),
     };
   }
-  reset(
-    canvasAndContext: { canvas: OffscreenCanvas },
-    width: number,
-    height: number,
-  ) {
+  reset(canvasAndContext: { canvas: OffscreenCanvas }, width: number, height: number) {
     canvasAndContext.canvas.width = width;
     canvasAndContext.canvas.height = height;
   }
@@ -135,10 +127,7 @@ async function renderPage(req: RenderRequest): Promise<RenderedPage> {
   return { pageNumber: req.pageNumber, image: { width, height, data: gray } };
 }
 
-async function computeClusterOverlay(
-  clusterId: string,
-  pages: RenderedPage[],
-): Promise<OverlayResult | null> {
+async function computeClusterOverlay(clusterId: string, pages: RenderedPage[]): Promise<OverlayResult | null> {
   const preview = calculateOverlay(pages.map((p) => p.image));
   if (!preview) return null;
   return { clusterId, preview };

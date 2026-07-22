@@ -1,11 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  pixelRectToRatios,
-  rotateRatios,
-  ratiosToAbsoluteBox,
-  ratiosToPixelRect,
-  clamp,
-} from "./ratios";
+import { pixelRectToRatios, rotateRatios, ratiosToAbsoluteBox, ratiosToPixelRect, clamp } from "./ratios";
 
 describe("clamp", () => {
   it("clamps within range", () => {

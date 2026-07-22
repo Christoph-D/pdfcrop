@@ -2,7 +2,12 @@ import { describe, expect, it } from "vitest";
 import { getAutoCropRatios } from "./autocrop";
 import type { GrayImage } from "./overlay";
 
-function makeImage(w: number, h: number, fill: number, contentRect: Array<[number, number, number, number]> = []): GrayImage {
+function makeImage(
+  w: number,
+  h: number,
+  fill: number,
+  contentRect: Array<[number, number, number, number]> = [],
+): GrayImage {
   const data = new Uint8Array(w * h).fill(fill);
   for (const [x0, y0, x1, y1] of contentRect) {
     for (let y = y0; y < y1; y++) {

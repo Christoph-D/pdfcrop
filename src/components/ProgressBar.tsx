@@ -6,10 +6,7 @@ export default function ProgressBar() {
   const total = useWorkspaceStore((s) => s.progressTotal);
   const status = useWorkspaceStore((s) => s.status);
   const pct = total > 0 ? Math.round((done / total) * 100) : 0;
-  const label =
-    status === "clustering"
-      ? "Clustering pages…"
-      : `Rendering previews… ${done}/${total}`;
+  const label = status === "clustering" ? "Clustering pages…" : `Rendering previews… ${done}/${total}`;
 
   return (
     <div className="progress-bar">

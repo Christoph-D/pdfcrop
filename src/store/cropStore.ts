@@ -70,9 +70,7 @@ export const useCropStore = create<CropState>((set) => ({
       return {
         rectsByCluster: {
           ...s.rectsByCluster,
-          [clusterId]: list.map((r) =>
-            r.id === rectId ? { ...r, ...patch } : r,
-          ),
+          [clusterId]: list.map((r) => (r.id === rectId ? { ...r, ...patch } : r)),
         },
       };
     }),
@@ -86,13 +84,10 @@ export const useCropStore = create<CropState>((set) => ({
         },
         selectedRectId: s.selectedRectId === rectId ? null : s.selectedRectId,
         selectedClusterId:
-          s.selectedClusterId === clusterId && s.selectedRectId === rectId
-            ? null
-            : s.selectedClusterId,
+          s.selectedClusterId === clusterId && s.selectedRectId === rectId ? null : s.selectedClusterId,
       };
     }),
-  select: (clusterId, rectId) =>
-    set({ selectedClusterId: clusterId, selectedRectId: rectId }),
+  select: (clusterId, rectId) => set({ selectedClusterId: clusterId, selectedRectId: rectId }),
   clearAll: () =>
     set({
       rectsByCluster: {},

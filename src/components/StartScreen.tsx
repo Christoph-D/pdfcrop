@@ -34,12 +34,7 @@ export default function StartScreen() {
           Drop a PDF here, or
           <label className="drop-zone__button">
             Choose file
-            <input
-              type="file"
-              accept="application/pdf,.pdf"
-              hidden
-              onChange={(e) => handleFile(e.target.files?.[0])}
-            />
+            <input type="file" accept="application/pdf,.pdf" hidden onChange={(e) => handleFile(e.target.files?.[0])} />
           </label>
         </p>
         {isLoading && <p className="drop-zone__loading">Loading…</p>}

@@ -26,16 +26,12 @@ export class CorruptPdfError extends Error {
 }
 
 function normalizeRotation(r: number | undefined): Rotation {
-  const v = ((r ?? 0) % 360 + 360) % 360;
+  const v = (((r ?? 0) % 360) + 360) % 360;
   if (v === 0 || v === 90 || v === 180 || v === 270) return v;
   return 0;
 }
 
-export async function loadPdf(
-  data: ArrayBuffer,
-  fileName: string,
-  password?: string,
-): Promise<PdfSource> {
+export async function loadPdf(data: ArrayBuffer, fileName: string, password?: string): Promise<PdfSource> {
   let doc: pdfjsLib.PDFDocumentProxy;
   try {
     // pdf.js transfers (and detaches) the ArrayBuffer it receives into its

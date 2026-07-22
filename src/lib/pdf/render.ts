@@ -33,21 +33,19 @@ export async function renderClusterPreviews(
   const dataCopy = data.slice(0);
 
   // Copy the buffer once per render; the worker keeps a cache keyed by size.
-  const requests: Array<{ cluster: Cluster; pages: Promise<RenderedPage>[] }> = clusters.map(
-    (cluster) => ({
-      cluster,
-      pages: cluster.pagesToMerge.map((pageNumber) => {
-        const req: RenderRequest = {
-          // Each call gets its own copy because transferable would invalidate
-          // future calls; pdf.js copies internally anyway.
-          data: dataCopy.slice(0),
-          password: password ?? undefined,
-          pageNumber,
-        };
-        return worker.renderPage(Comlink.transfer(req, []));
-      }),
+  const requests: Array<{ cluster: Cluster; pages: Promise<RenderedPage>[] }> = clusters.map((cluster) => ({
+    cluster,
+    pages: cluster.pagesToMerge.map((pageNumber) => {
+      const req: RenderRequest = {
+        // Each call gets its own copy because transferable would invalidate
+        // future calls; pdf.js copies internally anyway.
+        data: dataCopy.slice(0),
+        password: password ?? undefined,
+        pageNumber,
+      };
+      return worker.renderPage(Comlink.transfer(req, []));
     }),
-  );
+  }));
 
   const total = requests.reduce((acc, r) => acc + r.pages.length, 0);
   let done = 0;

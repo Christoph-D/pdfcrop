@@ -8,7 +8,9 @@
   border-radius: 12px;
   margin: 0;
   background: #1f1f1f;
-  transition: border-color 0.15s, background 0.15s;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
 }
 
 .drop-zone--active {
@@ -54,4 +56,3 @@
   margin-top: 16px;
   color: #b0b0b0;
 }
-

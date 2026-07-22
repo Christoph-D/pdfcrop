@@ -11,25 +11,10 @@ import {
   ratiosToPixelRect,
 } from "@/lib/pdf/ratios";
 import { useWorkspaceStore } from "@/store/workspaceStore";
-import {
-  newRectId,
-  useCropStore,
-  type CropRect,
-  type SizeAnchor,
-} from "@/store/cropStore";
+import { newRectId, useCropStore, type CropRect, type SizeAnchor } from "@/store/cropStore";
 import "./ClusterPanel.css";
 
-type Handle =
-  | "move"
-  | "nw"
-  | "ne"
-  | "sw"
-  | "se"
-  | "edge-n"
-  | "edge-s"
-  | "edge-e"
-  | "edge-w"
-  | "draw";
+type Handle = "move" | "nw" | "ne" | "sw" | "se" | "edge-n" | "edge-s" | "edge-e" | "edge-w" | "draw";
 
 interface Props {
   cluster: Cluster;
@@ -169,8 +154,7 @@ export default function ClusterPanel({ cluster, preview, previewUrl }: Props) {
       let chosen: { rect: CropRect; handle: Handle } | null = null;
       for (let i = rects.length - 1; i >= 0; i--) {
         const r = rects[i]!;
-        const isSelected =
-          selectedClusterId === cluster.id && selectedRectId === r.id;
+        const isSelected = selectedClusterId === cluster.id && selectedRectId === r.id;
         const handle = hitTest(r, x, y, isSelected);
         if (handle) {
           chosen = { rect: r, handle };
@@ -217,8 +201,7 @@ export default function ClusterPanel({ cluster, preview, previewUrl }: Props) {
         let hover: Handle | null = null;
         for (let i = rects.length - 1; i >= 0; i--) {
           const r = rects[i]!;
-          const isSelected =
-            selectedClusterId === cluster.id && selectedRectId === r.id;
+          const isSelected = selectedClusterId === cluster.id && selectedRectId === r.id;
           const handle = hitTest(r, x, y, isSelected);
           if (handle) {
             hover = handle;
@@ -310,15 +293,21 @@ export default function ClusterPanel({ cluster, preview, previewUrl }: Props) {
             imgH: p.preview.height,
           };
         }
-        propagateSizeFromRect(
-          cluster.id,
-          state.rectId,
-          dimsByCluster,
-          anchorForHandle(state.handle),
-        );
+        propagateSizeFromRect(cluster.id, state.rectId, dimsByCluster, anchorForHandle(state.handle));
       }
     },
-    [cluster.id, imgH, imgW, propagateSizeFromRect, rects, selectedClusterId, selectedRectId, syncSizes, toImageCoords, updateRect],
+    [
+      cluster.id,
+      imgH,
+      imgW,
+      propagateSizeFromRect,
+      rects,
+      selectedClusterId,
+      selectedRectId,
+      syncSizes,
+      toImageCoords,
+      updateRect,
+    ],
   );
 
   const endDrag = useCallback(
@@ -327,9 +316,7 @@ export default function ClusterPanel({ cluster, preview, previewUrl }: Props) {
       const state = dragState.current;
       dragState.current = null;
       if (state?.handle === "draw" && state.rectId) {
-        const r = useCropStore
-          .getState()
-          .rectsByCluster[cluster.id]?.find((x) => x.id === state.rectId);
+        const r = useCropStore.getState().rectsByCluster[cluster.id]?.find((x) => x.id === state.rectId);
         if (r && !hasEnoughSpaceForHandles(r)) {
           removeRect(cluster.id, state.rectId);
         }
@@ -341,21 +328,13 @@ export default function ClusterPanel({ cluster, preview, previewUrl }: Props) {
   // Delete selected rect on Delete key.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (
-        e.key !== "Delete" &&
-        e.key !== "Backspace" &&
-        e.key !== "Escape"
-      )
-        return;
+      if (e.key !== "Delete" && e.key !== "Backspace" && e.key !== "Escape") return;
       const sel = useCropStore.getState();
       if (e.key === "Escape") {
         select(null, null);
         return;
       }
-      if (
-        sel.selectedClusterId === cluster.id &&
-        sel.selectedRectId
-      ) {
+      if (sel.selectedClusterId === cluster.id && sel.selectedRectId) {
         e.preventDefault();
         removeRect(cluster.id, sel.selectedRectId);
       }
@@ -387,12 +366,9 @@ export default function ClusterPanel({ cluster, preview, previewUrl }: Props) {
       >
         <image href={previewUrl} x={0} y={0} width={imgW} height={imgH} />
         {rects.map((r, idx) => {
-          const selected =
-            selectedClusterId === cluster.id && selectedRectId === r.id;
+          const selected = selectedClusterId === cluster.id && selectedRectId === r.id;
           const tooSmall = !hasEnoughSpaceForHandles(r);
-          const fill = tooSmall
-            ? "rgba(220, 50, 50, 0.25)"
-            : "rgba(60, 130, 220, 0.25)";
+          const fill = tooSmall ? "rgba(220, 50, 50, 0.25)" : "rgba(60, 130, 220, 0.25)";
           const stroke = selected ? "#000" : "rgba(60,130,220,0.9)";
           return (
             <g key={r.id}>
@@ -416,21 +392,26 @@ export default function ClusterPanel({ cluster, preview, previewUrl }: Props) {
                 {idx + 1}
               </text>
               {selected &&
-                ([[r.x, r.y], [r.x + r.w, r.y], [r.x, r.y + r.h], [r.x + r.w, r.y + r.h]] as Array<[number, number]>).map(
-                  ([hx, hy], i) => (
-                    <rect
-                      key={i}
-                      x={hx - CORNER_DIMENSION / 2}
-                      y={hy - CORNER_DIMENSION / 2}
-                      width={CORNER_DIMENSION}
-                      height={CORNER_DIMENSION}
-                      fill="#fff"
-                      stroke="#000"
-                      strokeWidth={1}
-                      vectorEffect="non-scaling-stroke"
-                    />
-                  ),
-                )}
+                (
+                  [
+                    [r.x, r.y],
+                    [r.x + r.w, r.y],
+                    [r.x, r.y + r.h],
+                    [r.x + r.w, r.y + r.h],
+                  ] as Array<[number, number]>
+                ).map(([hx, hy], i) => (
+                  <rect
+                    key={i}
+                    x={hx - CORNER_DIMENSION / 2}
+                    y={hy - CORNER_DIMENSION / 2}
+                    width={CORNER_DIMENSION}
+                    height={CORNER_DIMENSION}
+                    fill="#fff"
+                    stroke="#000"
+                    strokeWidth={1}
+                    vectorEffect="non-scaling-stroke"
+                  />
+                ))}
             </g>
           );
         })}

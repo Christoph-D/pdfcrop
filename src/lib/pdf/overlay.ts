@@ -90,8 +90,7 @@ export function calculateOverlay(images: GrayImage[]): GrayImage | null {
   }
 
   // Decide projection: if most non-white pixels are identical, use min; else sd.
-  const useFallback =
-    identicalPixels > npix * IDENTICAL_PIXELS_THRESHOLD - whitePixels;
+  const useFallback = identicalPixels > npix * IDENTICAL_PIXELS_THRESHOLD - whitePixels;
 
   const out = new Uint8Array(npix);
   if (useFallback) {

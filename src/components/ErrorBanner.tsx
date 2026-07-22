@@ -15,11 +15,7 @@ export default function ErrorBanner() {
     <div className="error-banner error-banner--blocking">
       <div className="error-banner__title">Something went wrong</div>
       <pre className="error-banner__message">{error}</pre>
-      <button
-        type="button"
-        className="error-banner__reset"
-        onClick={reset}
-      >
+      <button type="button" className="error-banner__reset" onClick={reset}>
         Start over
       </button>
     </div>

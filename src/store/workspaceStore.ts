@@ -5,13 +5,7 @@ import { cropPdf, croppedFileName, type CropOutput } from "@/lib/pdf/write";
 import type { PdfSource } from "@/lib/pdf/types";
 import { useCropStore } from "./cropStore";
 
-export type WorkspaceStatus =
-  | "idle"
-  | "clustering"
-  | "rendering"
-  | "ready"
-  | "cropping"
-  | "error";
+export type WorkspaceStatus = "idle" | "clustering" | "rendering" | "ready" | "cropping" | "error";
 
 interface WorkspaceState {
   status: WorkspaceStatus;
@@ -125,10 +119,7 @@ async function triggerDownload(bytes: Uint8Array, fileName: string): Promise<voi
       await writable.close();
       return;
     } catch (err) {
-      if (
-        err instanceof DOMException &&
-        (err.name === "AbortError" || err.name === "NotAllowedError")
-      ) {
+      if (err instanceof DOMException && (err.name === "AbortError" || err.name === "NotAllowedError")) {
         return; // user cancelled
       }
       // fall through to download

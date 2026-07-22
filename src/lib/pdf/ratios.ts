@@ -36,11 +36,7 @@ export function pixelRectToRatios(rect: PixelRect, imgW: number, imgH: number): 
  * Inverse of `pixelRectToRatios`. Converts PDF margin ratios back to a
  * pixel-space rect in image (top-left origin) coordinates.
  */
-export function ratiosToPixelRect(
-  ratios: Ratios,
-  imgW: number,
-  imgH: number,
-): PixelRect {
+export function ratiosToPixelRect(ratios: Ratios, imgW: number, imgH: number): PixelRect {
   const [left, bottom, right, top] = ratios;
   const x1 = left * imgW;
   const x2 = (1 - right) * imgW;
@@ -65,7 +61,7 @@ export function clamp(v: number, lo: number, hi: number): number {
  */
 export function rotateRatios(ratios: Ratios, rotation: Rotation): Ratios {
   let [a, b, c, d] = ratios;
-  const steps = (((rotation ?? 0) % 360) + 360) % 360 / 90;
+  const steps = ((((rotation ?? 0) % 360) + 360) % 360) / 90;
   for (let i = 0; i < steps; i++) {
     [a, b, c, d] = [b, c, d, a];
   }

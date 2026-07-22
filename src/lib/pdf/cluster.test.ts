@@ -1,10 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  clusterPages,
-  choosePagesToMerge,
-  roundSize,
-  type Cluster,
-} from "./cluster";
+import { clusterPages, choosePagesToMerge, roundSize, type Cluster } from "./cluster";
 import type { PageMetadata } from "./types";
 
 function page(n: number, w = 595, h = 842): PageMetadata {

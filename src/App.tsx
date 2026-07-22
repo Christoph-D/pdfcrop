@@ -26,15 +26,13 @@ export default function App() {
         if (cancelled) return;
         setClusters(clusters);
         setStatus("rendering");
-        setProgress(0, clusters.reduce((n, c) => n + c.pagesToMerge.length, 0));
-        const previews = await renderClusterPreviews(
-          source.data,
-          clusters,
-          password,
-          (done, total) => {
-            if (!cancelled) setProgress(done, total);
-          },
+        setProgress(
+          0,
+          clusters.reduce((n, c) => n + c.pagesToMerge.length, 0),
         );
+        const previews = await renderClusterPreviews(source.data, clusters, password, (done, total) => {
+          if (!cancelled) setProgress(done, total);
+        });
         if (cancelled) return;
         setPreviews(previews);
       } catch (err) {
@@ -46,15 +44,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [
-    source,
-    password,
-    setClusters,
-    setStatus,
-    setPreviews,
-    setProgress,
-    setError,
-  ]);
+  }, [source, password, setClusters, setStatus, setPreviews, setProgress, setError]);
 
   if (source && (status === "ready" || status === "cropping" || status === "error")) {
     return <CroppingView />;

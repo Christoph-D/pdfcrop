@@ -40,12 +40,7 @@ export default function PasswordModal({
           <button type="button" className="modal__cancel" onClick={onCancel}>
             Cancel
           </button>
-          <button
-            type="button"
-            className="modal__ok"
-            onClick={onSubmit}
-            disabled={!passwordInput}
-          >
+          <button type="button" className="modal__ok" onClick={onSubmit} disabled={!passwordInput}>
             Unlock
           </button>
         </div>

@@ -22,8 +22,7 @@ export default function CroppingView() {
   const [isDragging, setIsDragging] = useState(false);
   const dragDepth = useRef(0);
 
-  const showOutlineWarning =
-    lastCrop && !lastCrop.outlinePreserved && !outlineDismissed;
+  const showOutlineWarning = lastCrop && !lastCrop.outlinePreserved && !outlineDismissed;
 
   const dimsByCluster = useMemo(() => {
     const map: Record<string, { imgW: number; imgH: number }> = {};
@@ -40,9 +39,7 @@ export default function CroppingView() {
     let sourceClusterId: string | null = state.selectedClusterId;
     let sourceRectId: string | null = state.selectedRectId;
     const hasValidSelection =
-      sourceClusterId &&
-      sourceRectId &&
-      state.rectsByCluster[sourceClusterId]?.some((r) => r.id === sourceRectId);
+      sourceClusterId && sourceRectId && state.rectsByCluster[sourceClusterId]?.some((r) => r.id === sourceRectId);
     if (!hasValidSelection) {
       for (const [cid, list] of Object.entries(state.rectsByCluster)) {
         if (list.length) {
@@ -110,11 +107,7 @@ export default function CroppingView() {
           {clusters.length} clusters · {source.pages.length} pages
         </span>
         <label className="cropping-view__sync">
-          <input
-            type="checkbox"
-            checked={syncSizes}
-            onChange={(e) => toggleSync(e.target.checked)}
-          />
+          <input type="checkbox" checked={syncSizes} onChange={(e) => toggleSync(e.target.checked)} />
           Synchronize sizes
         </label>
         <div className="cropping-view__spacer" />
@@ -138,8 +131,7 @@ export default function CroppingView() {
 
       {showOutlineWarning && (
         <div className="cropping-view__warn">
-          Bookmarks were removed because at least one cluster has multiple
-          crop rectangles.{" "}
+          Bookmarks were removed because at least one cluster has multiple crop rectangles.{" "}
           <button type="button" onClick={() => setOutlineDismissed(true)}>
             dismiss
           </button>

@@ -1,11 +1,6 @@
 import { PDFDocument } from "pdf-lib";
 import type { Cluster } from "./cluster";
-import {
-  pixelRectToRatios,
-  ratiosToAbsoluteBox,
-  rotateRatios,
-  type Ratios,
-} from "./ratios";
+import { pixelRectToRatios, ratiosToAbsoluteBox, rotateRatios, type Ratios } from "./ratios";
 import type { PdfSource } from "./types";
 import type { CropRect } from "@/store/cropStore";
 
@@ -43,9 +38,7 @@ export async function cropPdf(input: CropInput): Promise<CropOutput> {
 
   // Build a per-page list of ratios (in PDF coordinates) by expanding each
   // cluster's rectangles over every page it owns.
-  const previewByCluster = new Map(
-    previews.map((p) => [p.clusterId, p.preview]),
-  );
+  const previewByCluster = new Map(previews.map((p) => [p.clusterId, p.preview]));
   const clusterByPageNumber = new Map<number, Cluster>();
   for (const cluster of clusters) {
     for (const pageNumber of cluster.allPages) {
@@ -63,9 +56,7 @@ export async function cropPdf(input: CropInput): Promise<CropOutput> {
     }
     const preview = previewByCluster.get(cluster.id)!;
     const drawn = rectsByCluster[cluster.id] ?? [];
-    const ratios = drawn.map((r) =>
-      pixelRectToRatios(r, preview.width, preview.height),
-    );
+    const ratios = drawn.map((r) => pixelRectToRatios(r, preview.width, preview.height));
     const list: Ratios[] = ratios.length > 0 ? ratios : [[0, 0, 0, 0]];
     ratiosPerPage.set(pn, list);
     if (list.length > maxRectsPerPage) maxRectsPerPage = list.length;
@@ -146,7 +137,7 @@ export async function cropPdf(input: CropInput): Promise<CropOutput> {
  * preview and is consistent with pdf-lib's box setters on rotated pages).
  */
 function applyCrop(page: ReturnType<PDFDocument["getPages"]>[number], ratios: Ratios): void {
-  const rotation = (((page.getRotation().angle ?? 0) % 360) + 360) % 360 as 0 | 90 | 180 | 270;
+  const rotation = ((((page.getRotation().angle ?? 0) % 360) + 360) % 360) as 0 | 90 | 180 | 270;
   const rotated = rotateRatios(ratios, rotation);
   const basisW = page.getWidth();
   const basisH = page.getHeight();

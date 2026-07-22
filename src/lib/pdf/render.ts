@@ -3,14 +3,11 @@ import type { Cluster } from "./cluster";
 import type { GrayImage } from "./overlay";
 import type { PdfWorkerApi, RenderedPage, RenderRequest } from "@/workers/pdf.worker";
 
-let workerApi: PdfWorkerApi | null = null;
-function getWorker(): PdfWorkerApi {
-  if (workerApi) return workerApi;
+function createWorker(): { api: PdfWorkerApi; terminate: () => void } {
   const worker = new Worker(new URL("../../workers/pdf.worker.ts", import.meta.url), {
     type: "module",
   });
-  workerApi = Comlink.wrap<PdfWorkerApi>(worker);
-  return workerApi;
+  return { api: Comlink.wrap<PdfWorkerApi>(worker), terminate: () => worker.terminate() };
 }
 
 export interface ClusterPreview {
@@ -29,16 +26,15 @@ export async function renderClusterPreviews(
   password: string | null,
   onProgress?: (done: number, total: number) => void,
 ): Promise<ClusterPreview[]> {
-  const worker = getWorker();
+  const { api: worker, terminate } = createWorker();
   const dataCopy = data.slice(0);
 
-  // Copy the buffer once per render; the worker keeps a cache keyed by size.
+  // Each page render gets its own buffer copy because pdf.js transfers (and
+  // detaches) the ArrayBuffer it receives into its in-thread worker.
   const requests: Array<{ cluster: Cluster; pages: Promise<RenderedPage>[] }> = clusters.map((cluster) => ({
     cluster,
     pages: cluster.pagesToMerge.map((pageNumber) => {
       const req: RenderRequest = {
-        // Each call gets its own copy because transferable would invalidate
-        // future calls; pdf.js copies internally anyway.
         data: dataCopy.slice(0),
         password: password ?? undefined,
         pageNumber,
@@ -81,6 +77,7 @@ export async function renderClusterPreviews(
   );
 
   void worker.dispose();
+  terminate();
   return previews;
 }
 

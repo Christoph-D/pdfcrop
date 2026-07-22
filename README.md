@@ -6,6 +6,8 @@ download a cropped copy. Everything runs in your browser — no server, no uploa
 PDFCrop is a reimplementation of the desktop application [Briss-2.0](https://github.com/mbaeuerle/Briss-2.0) (see
 [Attribution](#attribution) below).
 
+Live version: https://christoph-d.github.io/pdfcrop/.
+
 ## What it does
 
 - **Clustered previews.** Pages are grouped by size and even/odd parity, then merged into a single preview image per

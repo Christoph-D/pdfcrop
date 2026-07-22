@@ -12,7 +12,8 @@
     "format": "prettier --write . | { grep -v '(unchanged)$'; true; }",
     "format:check": "prettier --check --log-level warn .",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm format:check"
   },
   "dependencies": {
     "comlink": "^4.4.1",

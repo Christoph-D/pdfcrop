@@ -9,7 +9,6 @@ import ErrorBanner from "@/components/ErrorBanner";
 
 export default function App() {
   const source = useWorkspaceStore((s) => s.source);
-  const password = useWorkspaceStore((s) => s.password);
   const status = useWorkspaceStore((s) => s.status);
   const setClusters = useWorkspaceStore((s) => s.setClusters);
   const setStatus = useWorkspaceStore((s) => s.setStatus);
@@ -30,7 +29,7 @@ export default function App() {
           0,
           clusters.reduce((n, c) => n + c.pagesToMerge.length, 0),
         );
-        const previews = await renderClusterPreviews(source.data, clusters, password, (done, total) => {
+        const previews = await renderClusterPreviews(source.data, clusters, (done, total) => {
           if (!cancelled) setProgress(done, total);
         });
         if (cancelled) return;
@@ -44,7 +43,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [source, password, setClusters, setStatus, setPreviews, setProgress, setError]);
+  }, [source, setClusters, setStatus, setPreviews, setProgress, setError]);
 
   if (source && (status === "ready" || status === "cropping" || status === "error")) {
     return <CroppingView />;

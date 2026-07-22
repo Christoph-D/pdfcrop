@@ -3,7 +3,7 @@ import { usePdfLoader } from "@/hooks/usePdfLoader";
 import "./StartScreen.css";
 
 export default function StartScreen() {
-  const { isLoading, handleFile, passwordModal } = usePdfLoader();
+  const { isLoading, handleFile } = usePdfLoader();
   const [isDragging, setIsDragging] = useState(false);
   const dragDepth = useRef(0);
 
@@ -39,8 +39,6 @@ export default function StartScreen() {
         </p>
         {isLoading && <p className="drop-zone__loading">Loading…</p>}
       </div>
-
-      {passwordModal}
     </div>
   );
 }

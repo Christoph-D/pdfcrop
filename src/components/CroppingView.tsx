@@ -16,7 +16,7 @@ export default function CroppingView() {
   const syncSizes = useCropStore((s) => s.syncSizes);
   const setSyncSizes = useCropStore((s) => s.setSyncSizes);
   const propagateSizeFromRect = useCropStore((s) => s.propagateSizeFromRect);
-  const { handleFile, passwordModal } = usePdfLoader();
+  const { handleFile } = usePdfLoader();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [outlineDismissed, setOutlineDismissed] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -159,8 +159,6 @@ export default function CroppingView() {
           );
         })}
       </div>
-
-      {passwordModal}
     </div>
   );
 }

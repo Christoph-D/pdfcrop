@@ -74,7 +74,6 @@ const getDocDefaults = {
 
 export interface RenderRequest {
   data: ArrayBuffer | Uint8Array;
-  password?: string;
   pageNumber: number;
   targetHeight?: number;
 }
@@ -91,7 +90,7 @@ export interface OverlayResult {
 
 async function renderPage(req: RenderRequest): Promise<RenderedPage> {
   const targetHeight = req.targetHeight ?? MAX_PAGE_HEIGHT;
-  const doc = await pdfjsLib.getDocument({ data: req.data, password: req.password, ...getDocDefaults }).promise;
+  const doc = await pdfjsLib.getDocument({ data: req.data, ...getDocDefaults }).promise;
   const page = await doc.getPage(req.pageNumber);
   const baseViewport = page.getViewport({ scale: 1 });
   const scale = targetHeight / baseViewport.height;

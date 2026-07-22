@@ -6,7 +6,6 @@ import type { CropRect } from "@/store/cropStore";
 
 export interface CropInput {
   source: PdfSource;
-  password: string | null;
   clusters: Cluster[];
   rectsByCluster: Record<string, CropRect[]>;
   previews: { clusterId: string; preview: { width: number; height: number } }[];
@@ -64,9 +63,10 @@ export async function cropPdf(input: CropInput): Promise<CropOutput> {
 
   const outlinePreserved = maxRectsPerPage <= 1;
 
-  // Load the source via pdf-lib. If the source is encrypted, pdf-lib can load
-  // it only when the password is supplied (or it is empty); otherwise the
-  // caller should pass decrypted bytes.
+  // `ignoreEncryption: true` lets pdf-lib open PDFs that are marked as
+  // encrypted but have an empty user password (pdf.js loads these without
+  // prompting). PDFs that require an actual password are rejected upstream
+  // in `loadPdf`.
   const srcDoc = await PDFDocument.load(source.data, {
     ignoreEncryption: true,
   });

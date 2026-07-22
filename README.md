@@ -17,7 +17,6 @@ Live version: https://christoph-d.github.io/pdfcrop/.
 - **Auto-crop.** Optionally infer the crop rectangle for a cluster from the merged preview's content.
 - **Size sync.** Propagate one rectangle's dimensions to every other cluster, so e.g. all even/odd pages end up the same
   size.
-- **Encrypted PDFs.** Prompts for a password when needed.
 - **Local-only.** All parsing, rendering, and cropping happen client-side using
   [pdf.js](https://mozilla.github.io/pdf.js/) (read), [pdf-lib](https://pdf-lib.js.org/) (write), and a Web Worker for
   the heavy rasterization and overlay math.

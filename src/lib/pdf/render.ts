@@ -23,7 +23,6 @@ export interface ClusterPreview {
 export async function renderClusterPreviews(
   data: ArrayBuffer,
   clusters: Cluster[],
-  password: string | null,
   onProgress?: (done: number, total: number) => void,
 ): Promise<ClusterPreview[]> {
   const { api: worker, terminate } = createWorker();
@@ -36,7 +35,6 @@ export async function renderClusterPreviews(
     pages: cluster.pagesToMerge.map((pageNumber) => {
       const req: RenderRequest = {
         data: dataCopy.slice(0),
-        password: password ?? undefined,
         pageNumber,
       };
       return worker.renderPage(Comlink.transfer(req, []));

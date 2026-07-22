@@ -4,17 +4,10 @@ import type { PageMetadata, PdfSource, Rotation } from "./types";
 
 pdfjsLib.GlobalWorkerOptions.workerPort = new PdfWorker();
 
-export class PasswordRequiredError extends Error {
+export class EncryptedPdfError extends Error {
   constructor() {
-    super("Password required");
-    this.name = "PasswordRequiredError";
-  }
-}
-
-export class InvalidPasswordError extends Error {
-  constructor() {
-    super("Invalid password");
-    this.name = "InvalidPasswordError";
+    super("Encrypted PDFs are not supported");
+    this.name = "EncryptedPdfError";
   }
 }
 
@@ -31,7 +24,7 @@ function normalizeRotation(r: number | undefined): Rotation {
   return 0;
 }
 
-export async function loadPdf(data: ArrayBuffer, fileName: string, password?: string): Promise<PdfSource> {
+export async function loadPdf(data: ArrayBuffer, fileName: string): Promise<PdfSource> {
   let doc: pdfjsLib.PDFDocumentProxy;
   try {
     // pdf.js transfers (and detaches) the ArrayBuffer it receives into its
@@ -39,16 +32,12 @@ export async function loadPdf(data: ArrayBuffer, fileName: string, password?: st
     // rendering/cropping passes.
     doc = await pdfjsLib.getDocument({
       data: data.slice(0),
-      password,
       isEvalSupported: false,
     }).promise;
   } catch (err) {
     const e = err as { name?: string; message?: string };
     if (e.name === "PasswordException") {
-      if (e.message === "Incorrect password") {
-        throw new InvalidPasswordError();
-      }
-      throw new PasswordRequiredError();
+      throw new EncryptedPdfError();
     }
     if (e.name === "InvalidPDFException") {
       throw new CorruptPdfError(e.message ?? "Invalid PDF");

@@ -10,14 +10,13 @@ export type WorkspaceStatus = "idle" | "clustering" | "rendering" | "ready" | "c
 interface WorkspaceState {
   status: WorkspaceStatus;
   source: PdfSource | null;
-  password: string | null;
   clusters: Cluster[];
   previews: ClusterPreview[];
   progressDone: number;
   progressTotal: number;
   error: string | null;
   lastCrop: (CropOutput & { fileName: string }) | null;
-  setSource: (source: PdfSource, password: string | null) => void;
+  setSource: (source: PdfSource) => void;
   setClusters: (clusters: Cluster[]) => void;
   setPreviews: (previews: ClusterPreview[]) => void;
   setStatus: (status: WorkspaceStatus) => void;
@@ -30,16 +29,15 @@ interface WorkspaceState {
 export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   status: "idle",
   source: null,
-  password: null,
   clusters: [],
   previews: [],
   progressDone: 0,
   progressTotal: 0,
   error: null,
   lastCrop: null,
-  setSource: (source, password) => {
+  setSource: (source) => {
     useCropStore.getState().clearAll();
-    set({ source, password, status: "clustering", error: null });
+    set({ source, status: "clustering", error: null });
   },
   setClusters: (clusters) => set({ clusters }),
   setPreviews: (previews) => set({ previews, status: "ready" }),
@@ -54,7 +52,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       const cropStore = useCropStore.getState();
       const output = await cropPdf({
         source: state.source,
-        password: state.password,
         clusters: state.clusters,
         rectsByCluster: cropStore.rectsByCluster,
         previews: state.previews.map((p) => ({
@@ -76,7 +73,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     set({
       status: "idle",
       source: null,
-      password: null,
       clusters: [],
       previews: [],
       progressDone: 0,

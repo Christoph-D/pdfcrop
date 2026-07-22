@@ -36,11 +36,14 @@ full description.
 
 ## After every change
 
-You MUST run `format` and `check` after making any change:
+You MUST run `format`, `check`, and the end-to-end tests after making any change:
 
 ```sh
 pnpm format
 pnpm check
+pnpm test:e2e
 ```
 
-`pnpm check` runs lint, typecheck, tests, and format:check. Do not consider a task complete until both commands pass.
+`pnpm check` runs lint, typecheck, unit tests, and format:check. `pnpm test:e2e` is separate — it boots the Vite dev
+server and drives the real UI in Chromium (first time: `pnpm exec playwright install chromium`). Do not consider a task
+complete until all three commands pass.

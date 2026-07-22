@@ -25,11 +25,12 @@ columns/rows, copy/paste rects, etc.).
 
 ## How to run it
 
-Requires Node.js (tested on the LTS line).
+Requires Node.js (tested on the LTS line) and [pnpm](https://pnpm.io). The pnpm version is pinned in
+`package.json` via the `packageManager` field; run `corepack enable` if you don't already have pnpm.
 
 ```bash
-npm install
-npm run dev
+pnpm install
+pnpm dev
 ```
 
 Then open the URL Vite prints (typically `http://localhost:5173`).
@@ -38,17 +39,17 @@ Then open the URL Vite prints (typically `http://localhost:5173`).
 
 | Script               | Purpose                                             |
 | -------------------- | --------------------------------------------------- |
-| `npm run build`      | Type-check and produce a static build in `dist/`.   |
-| `npm run preview`    | Serve the built `dist/` locally for a sanity check. |
-| `npm run lint`       | Run ESLint.                                         |
-| `npm run typecheck`  | Run `tsc --noEmit`.                                 |
-| `npm test`           | Run the unit tests once (`vitest run`).             |
-| `npm run test:watch` | Run vitest in watch mode.                           |
+| `pnpm build`         | Type-check and produce a static build in `dist/`.   |
+| `pnpm preview`       | Serve the built `dist/` locally for a sanity check. |
+| `pnpm lint`          | Run ESLint.                                         |
+| `pnpm typecheck`     | Run `tsc --noEmit`.                                 |
+| `pnpm test`          | Run the unit tests once (`vitest run`).             |
+| `pnpm test:watch`    | Run vitest in watch mode.                           |
 
 ## How to deploy it
 
 ```bash
-npm run build
+pnpm build
 ```
 
 This produces a minified, fully static build in `dist/`. The contents of `dist/` must be served by a web server (opening

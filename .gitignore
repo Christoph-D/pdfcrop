@@ -6,3 +6,5 @@ dist-ssr
 .DS_Store
 tsconfig.tsbuildinfo
 .tmp
+.pnpm-store/
+package-lock.json

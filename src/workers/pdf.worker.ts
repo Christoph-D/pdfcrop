@@ -86,14 +86,18 @@ const getDocDefaults = {
   useSystemFonts: false,
 } as const;
 
-export interface RenderRequest {
-  data: ArrayBuffer | Uint8Array;
-  pageNumber: number;
-  targetHeight?: number;
+export interface DocumentConfig {
+  data: ArrayBuffer;
   /** Absolute URL prefix (trailing slash) for pdf.js standard fonts. */
   standardFontDataUrl?: string;
   /** Absolute URL prefix (trailing slash) for packed pdf.js CMaps. */
   cMapUrl?: string;
+}
+
+export interface DocumentHandle {
+  /** Opaque id of a document loaded into this worker via `loadDocument`. */
+  id: number;
+  numPages: number;
 }
 
 export interface RenderedPage {
@@ -106,15 +110,23 @@ export interface OverlayResult {
   preview: GrayImage;
 }
 
-async function renderPage(req: RenderRequest): Promise<RenderedPage> {
-  const targetHeight = req.targetHeight ?? MAX_PAGE_HEIGHT;
+// Documents loaded once and reused across many page renders. This mirrors
+// Briss's `PDFImageExtractor`, which opens the PDF a single time and renders
+// every page from that one document instead of re-parsing it for each page.
+// In a worker pool each worker holds its own copy and renders a slice of the
+// pages, so the (expensive) parse happens once per worker rather than once per
+// page.
+const documents = new Map<number, pdfjsLib.PDFDocumentProxy>();
+let nextDocId = 1;
+
+async function loadDocument(config: DocumentConfig): Promise<DocumentHandle> {
   const doc = await pdfjsLib.getDocument({
-    data: req.data,
+    data: config.data,
     ...getDocDefaults,
     // Required for non-embedded standard fonts and named-CMap CID fonts;
     // without them those glyphs render as blank boxes.
-    standardFontDataUrl: req.standardFontDataUrl,
-    cMapUrl: req.cMapUrl,
+    standardFontDataUrl: config.standardFontDataUrl,
+    cMapUrl: config.cMapUrl,
     cMapPacked: true,
     // Fetch CMaps/standard fonts in-thread. Left to its default, pdf.js would
     // evaluate `document.baseURI` while computing `useWorkerFetch`, but
@@ -123,7 +135,15 @@ async function renderPage(req: RenderRequest): Promise<RenderedPage> {
     // evaluator, which fetches them with `fetch()`.
     useWorkerFetch: true,
   }).promise;
-  const page = await doc.getPage(req.pageNumber);
+  const id = nextDocId++;
+  documents.set(id, doc);
+  return { id, numPages: doc.numPages };
+}
+
+async function renderPage(docId: number, pageNumber: number, targetHeight = MAX_PAGE_HEIGHT): Promise<RenderedPage> {
+  const doc = documents.get(docId);
+  if (!doc) throw new Error(`renderPage: document ${docId} is not loaded`);
+  const page = await doc.getPage(pageNumber);
   const baseViewport = page.getViewport({ scale: 1 });
   const scale = targetHeight / baseViewport.height;
   const viewport = page.getViewport({ scale });
@@ -143,8 +163,17 @@ async function renderPage(req: RenderRequest): Promise<RenderedPage> {
   for (let i = 0, j = 0; i < img.data.length; i += 4, j++) {
     gray[j] = (img.data[i]! * 0.299 + img.data[i + 1]! * 0.587 + img.data[i + 2]! * 0.114) | 0;
   }
+  // Release this page's cached resources; the document itself stays open for
+  // the next render (see `unloadDocument`).
+  page.cleanup();
+  return { pageNumber, image: { width, height, data: gray } };
+}
+
+async function unloadDocument(docId: number): Promise<void> {
+  const doc = documents.get(docId);
+  if (!doc) return;
+  documents.delete(docId);
   await doc.destroy();
-  return { pageNumber: req.pageNumber, image: { width, height, data: gray } };
 }
 
 async function computeClusterOverlay(clusterId: string, pages: RenderedPage[]): Promise<OverlayResult | null> {
@@ -153,7 +182,7 @@ async function computeClusterOverlay(clusterId: string, pages: RenderedPage[]): 
   return { clusterId, preview };
 }
 
-const api = { renderPage, computeClusterOverlay };
+const api = { loadDocument, renderPage, unloadDocument, computeClusterOverlay };
 Comlink.expose(api);
 
 export type PdfWorkerApi = typeof api;

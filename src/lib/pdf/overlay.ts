@@ -55,36 +55,38 @@ export function calculateOverlay(images: GrayImage[]): GrayImage | null {
   let identicalPixels = 0;
   let whitePixels = 0;
 
-  // Accumulate sum and min per pixel across all images
+  // Accumulate sum and min per pixel across all images. The scratch arrays
+  // are fully initialized over [0, npix), so the values are never undefined;
+  // direct indexing (no nullish fallback) keeps the hot loop tight.
   for (let imgIdx = 0; imgIdx < n; imgIdx++) {
     const data = scaled[imgIdx]!.data;
     for (let i = 0; i < npix; i++) {
       const v = data[i]!;
-      mean[i] = (mean[i] ?? 0) + v;
-      if (v < (minProj[i] ?? 255)) minProj[i] = v;
+      mean[i] = mean[i]! + v;
+      if (v < minProj[i]!) minProj[i] = v;
     }
   }
-  for (let i = 0; i < npix; i++) mean[i] = (mean[i] ?? 0) / n;
+  for (let i = 0; i < npix; i++) mean[i]! /= n;
 
-  // Variance per pixel, count identical and white pixels
+  // Variance per pixel.
   const sd = new Float64Array(npix);
   for (let imgIdx = 0; imgIdx < n; imgIdx++) {
     const data = scaled[imgIdx]!.data;
     for (let i = 0; i < npix; i++) {
-      const d = data[i]! - (mean[i] ?? 0);
-      sd[i] = (sd[i] ?? 0) + d * d;
+      const d = data[i]! - mean[i]!;
+      sd[i] = sd[i]! + d * d;
     }
   }
 
   for (let i = 0; i < npix; i++) {
-    const m = mean[i] ?? 0;
+    const m = mean[i]!;
     if (m === 255) {
       whitePixels++;
       continue;
     }
     // "identical" in Briss = content present at the same place on every page
-    // (mean<255 and sd==0 after rounding to int)
-    if (m < 255 && (sd[i] ?? 0) === 0) {
+    // (mean<255 and sd==0 after rounding to int). m===255 already continued.
+    if (sd[i] === 0) {
       identicalPixels++;
     }
   }
@@ -99,7 +101,7 @@ export function calculateOverlay(images: GrayImage[]): GrayImage | null {
     // 255 - sqrt(variance/(N-1))
     const denom = Math.max(1, n - 1);
     for (let i = 0; i < npix; i++) {
-      const v = (sd[i] ?? 0) / denom;
+      const v = sd[i]! / denom;
       out[i] = Math.max(0, 255 - Math.round(Math.sqrt(v)));
     }
   }

@@ -40,7 +40,7 @@ jobs:
           node-version: lts/*
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm exec playwright install --with-deps chromium firefox
       - run: pnpm test:e2e
       - name: Upload Playwright artifacts
         if: ${{ !cancelled() }}

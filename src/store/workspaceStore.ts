@@ -9,7 +9,7 @@ import {
   parseCropSettings,
   serializeCropSettings,
 } from "@/lib/pdf/cropSettings";
-import { saveFile } from "@/lib/download";
+import { openBlankTab, saveFile, showBytesInTab } from "@/lib/download";
 import { cropPdf, croppedFileName, type CropOutput } from "@/lib/pdf/write";
 import type { PdfSource } from "@/lib/pdf/types";
 import { clamp } from "@/lib/pdf/ratios";
@@ -139,6 +139,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   cropAndSave: async () => {
     const state = get();
     if (!state.source) return;
+    // Open the preview tab synchronously while the click still counts as a
+    // user gesture. window.open() after the cropping `await` below would be
+    // treated as a non-user-initiated popup and silently blocked; we navigate
+    // this tab to the cropped PDF once the bytes are ready.
+    const previewTab = openBlankTab();
     set({ status: "cropping", error: null });
     try {
       const cropStore = useCropStore.getState();
@@ -152,14 +157,16 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         })),
       });
       const fileName = croppedFileName(state.source.fileName);
-      await saveFile(output.bytes, {
-        suggestedName: fileName,
-        mimeType: "application/pdf",
-        extension: ".pdf",
-        description: "PDF",
-      });
+      if (previewTab) {
+        showBytesInTab(previewTab, output.bytes, "application/pdf");
+      } else {
+        set({
+          error: "Could not open the cropped PDF in a new tab. Allow pop-ups for this site, then try again.",
+        });
+      }
       set({ status: "ready", lastCrop: { ...output, fileName } });
     } catch (err) {
+      previewTab?.close();
       set({
         status: "ready",
         error: err instanceof Error ? err.message : String(err),

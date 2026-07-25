@@ -6,7 +6,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SAMPLE_PDF = path.resolve(__dirname, "fixtures/sample.pdf");
 
 test.describe("PDF crop happy path", () => {
-  test("loads a PDF, renders cluster previews, and exports a cropped copy", async ({ page }) => {
+  test("loads a PDF, renders cluster previews, and opens a cropped copy in a new tab", async ({ page }) => {
     // First run pays the cost of booting pdf.js + its worker and rasterizing
     // previews; allow plenty of room on slower CI machines.
     test.setTimeout(60_000);
@@ -29,19 +29,34 @@ test.describe("PDF crop happy path", () => {
     // At least one merged cluster preview rendered.
     await expect(page.locator(".cluster-panel__svg").first()).toBeVisible();
 
-    // Chromium exposes showSaveFilePicker, but in headless mode it rejects with
-    // NotAllowedError, which the app treats as "user cancelled". Disable it so
-    // we exercise the <a download> fallback used by Firefox/Safari instead.
+    // Cropping opens the cropped PDF in a new browser tab instead of
+    // triggering a download. Spy on URL.createObjectURL so we can confirm the
+    // cropped PDF is served from a blob URL — headless Chromium ships without
+    // an inline PDF viewer, so the tab itself won't render the blob there.
     await page.evaluate(() => {
-      (window as unknown as { showSaveFilePicker?: unknown }).showSaveFilePicker = undefined;
+      const create = URL.createObjectURL;
+      URL.createObjectURL = ((blob: Blob) => {
+        const url = create.call(URL, blob);
+        (window as unknown as { __blobs?: { url: string; type: string }[] }).__blobs ??= [];
+        (window as unknown as { __blobs: { url: string; type: string }[] }).__blobs.push({ url, type: blob.type });
+        return url;
+      }) as typeof URL.createObjectURL;
     });
 
-    // Cropping triggers a download of the cropped file.
-    const [download] = await Promise.all([
-      page.waitForEvent("download"),
+    const [popup] = await Promise.all([
+      page.waitForEvent("popup"),
       page.getByRole("button", { name: "Crop PDF" }).click(),
     ]);
-    expect(download.suggestedFilename()).toBe("sample_cropped.pdf");
+
+    // A new tab opened.
+    expect(popup).toBeDefined();
+
+    // The cropped PDF was turned into an application/pdf blob URL that the new
+    // tab was pointed at (and would render inline in a real browser).
+    const blobs = await page.evaluate(
+      () => (window as unknown as { __blobs?: { url: string; type: string }[] }).__blobs,
+    );
+    expect(blobs).toEqual(expect.arrayContaining([{ url: expect.stringMatching(/^blob:/), type: "application/pdf" }]));
   });
 
   test("re-clusters with excluded pages, forcing them into singleton clusters", async ({ page }) => {

@@ -28,6 +28,13 @@ export async function renderClusterPreviews(
   const { api: worker, terminate } = createWorker();
   const dataCopy = data.slice(0);
 
+  // Resolve BASE_URL against the document: with the relative base ("./") a
+  // raw "./standard_fonts/" would resolve against the worker's location in
+  // dist/assets/ instead of the app root.
+  const assetBase = new URL(import.meta.env.BASE_URL, document.baseURI).href;
+  const standardFontDataUrl = `${assetBase}standard_fonts/`;
+  const cMapUrl = `${assetBase}cmaps/`;
+
   // Each page render gets its own buffer copy because pdf.js transfers (and
   // detaches) the ArrayBuffer it receives into its in-thread worker.
   const requests: Array<{ cluster: Cluster; pages: Promise<RenderedPage>[] }> = clusters.map((cluster) => ({
@@ -36,6 +43,8 @@ export async function renderClusterPreviews(
       const req: RenderRequest = {
         data: dataCopy.slice(0),
         pageNumber,
+        standardFontDataUrl,
+        cMapUrl,
       };
       return worker.renderPage(Comlink.transfer(req, []));
     }),

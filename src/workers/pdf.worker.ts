@@ -65,17 +65,35 @@ class WorkerFilterFactory {
   destroy(): void {}
 }
 
+// Worker-context canvas/filter/font plumbing for pdf.js (see file header).
 const getDocDefaults = {
   isEvalSupported: false,
   disableWorker: true,
   CanvasFactory: WorkerCanvasFactory,
   FilterFactory: WorkerFilterFactory,
+  // This thread has no `document`, so the Font Loading API
+  // (`isFontLoadingAPISupported` = `!!document.fonts`) is unavailable and
+  // `@font-face` rules can't be inserted. `disableFontFace` makes pdf.js draw
+  // each glyph as a path from the font's own outlines instead of via
+  // `ctx.fillText`. `useSystemFonts` must be false too: with it true pdf.js
+  // skips fetching standard-font data (returning null) and tries to register a
+  // system font (`loadSystemFont`), which hits pdf.js's `unreachable(...)
+  // branch (no Font Loading API in this thread) and leaves glyphs as blank
+  // boxes. Together these force pdf.js to fetch the real standard-font data
+  // (e.g. LiberationSans-*.ttf) from `standardFontDataUrl` and render its
+  // outlines.
+  disableFontFace: true,
+  useSystemFonts: false,
 } as const;
 
 export interface RenderRequest {
   data: ArrayBuffer | Uint8Array;
   pageNumber: number;
   targetHeight?: number;
+  /** Absolute URL prefix (trailing slash) for pdf.js standard fonts. */
+  standardFontDataUrl?: string;
+  /** Absolute URL prefix (trailing slash) for packed pdf.js CMaps. */
+  cMapUrl?: string;
 }
 
 export interface RenderedPage {
@@ -90,7 +108,21 @@ export interface OverlayResult {
 
 async function renderPage(req: RenderRequest): Promise<RenderedPage> {
   const targetHeight = req.targetHeight ?? MAX_PAGE_HEIGHT;
-  const doc = await pdfjsLib.getDocument({ data: req.data, ...getDocDefaults }).promise;
+  const doc = await pdfjsLib.getDocument({
+    data: req.data,
+    ...getDocDefaults,
+    // Required for non-embedded standard fonts and named-CMap CID fonts;
+    // without them those glyphs render as blank boxes.
+    standardFontDataUrl: req.standardFontDataUrl,
+    cMapUrl: req.cMapUrl,
+    cMapPacked: true,
+    // Fetch CMaps/standard fonts in-thread. Left to its default, pdf.js would
+    // evaluate `document.baseURI` while computing `useWorkerFetch`, but
+    // `document` is undefined in this worker (it would throw). Setting it
+    // explicitly short-circuits that and delivers the URLs to the worker's
+    // evaluator, which fetches them with `fetch()`.
+    useWorkerFetch: true,
+  }).promise;
   const page = await doc.getPage(req.pageNumber);
   const baseViewport = page.getViewport({ scale: 1 });
   const scale = targetHeight / baseViewport.height;

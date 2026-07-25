@@ -1,5 +1,4 @@
 import { useEffect } from "react";
-import { clusterPages } from "@/lib/pdf/cluster";
 import { renderClusterPreviews } from "@/lib/pdf/render";
 import { useWorkspaceStore } from "@/store/workspaceStore";
 import StartScreen from "@/components/StartScreen";
@@ -9,21 +8,23 @@ import ErrorBanner from "@/components/ErrorBanner";
 
 export default function App() {
   const source = useWorkspaceStore((s) => s.source);
+  const clusters = useWorkspaceStore((s) => s.clusters);
+  const isReclustering = useWorkspaceStore((s) => s.isReclustering);
   const status = useWorkspaceStore((s) => s.status);
-  const setClusters = useWorkspaceStore((s) => s.setClusters);
   const setStatus = useWorkspaceStore((s) => s.setStatus);
   const setPreviews = useWorkspaceStore((s) => s.setPreviews);
   const setProgress = useWorkspaceStore((s) => s.setProgress);
   const setError = useWorkspaceStore((s) => s.setError);
 
+  // Render (or re-render) merged previews whenever the cluster set changes.
+  // Clustering itself happens in the store actions (`setSource`,
+  // `reclusterWithExcludes`) so it — and the crop-rect transfer on re-cluster
+  // — runs exactly once rather than under StrictMode's dev double-invoke.
   useEffect(() => {
-    if (!source) return;
+    if (!source || clusters.length === 0) return;
     let cancelled = false;
     (async () => {
       try {
-        const clusters = clusterPages(source.pages);
-        if (cancelled) return;
-        setClusters(clusters);
         setStatus("rendering");
         setProgress(
           0,
@@ -43,9 +44,11 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [source, setClusters, setStatus, setPreviews, setProgress, setError]);
+  }, [source, clusters, setStatus, setPreviews, setProgress, setError]);
 
-  if (source && (status === "ready" || status === "cropping" || status === "error")) {
+  // The cropping view stays mounted across a re-cluster (isReclustering) so
+  // users keep their context while previews re-render.
+  if (source && (status === "ready" || status === "cropping" || status === "error" || isReclustering)) {
     return <CroppingView />;
   }
 

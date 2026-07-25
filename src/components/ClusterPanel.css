@@ -22,6 +22,10 @@
   padding: 4px 6px;
 }
 
+.cluster-panel__excluded {
+  color: #b00;
+}
+
 .cluster-panel__menu-backdrop {
   position: fixed;
   inset: 0;

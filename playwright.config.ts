@@ -7,7 +7,7 @@ import { defineConfig, devices } from "@playwright/test";
  * by the `webServer` block; in CI a fresh server is booted, locally an already
  * running `pnpm dev` is reused.
  */
-const PORT = 5173;
+const PORT = Number(process.env.E2E_PORT ?? 5173);
 const baseURL = `http://localhost:${PORT}`;
 
 export default defineConfig({

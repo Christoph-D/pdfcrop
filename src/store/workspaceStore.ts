@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { clusterPages, transferRectsBySize } from "@/lib/pdf/cluster";
 import type { Cluster } from "@/lib/pdf/cluster";
 import type { ClusterPreview } from "@/lib/pdf/render";
 import {
@@ -12,7 +13,7 @@ import { saveFile } from "@/lib/download";
 import { cropPdf, croppedFileName, type CropOutput } from "@/lib/pdf/write";
 import type { PdfSource } from "@/lib/pdf/types";
 import { clamp } from "@/lib/pdf/ratios";
-import { newRectId, useCropStore } from "./cropStore";
+import { newRectId, useCropStore, type CropRect } from "./cropStore";
 
 export type WorkspaceStatus = "idle" | "clustering" | "rendering" | "ready" | "cropping" | "error";
 
@@ -29,6 +30,14 @@ interface WorkspaceState {
   status: WorkspaceStatus;
   source: PdfSource | null;
   clusters: Cluster[];
+  /** Pages forced into singleton clusters (Briss "exclude pages"). */
+  excludes: ReadonlySet<number>;
+  /**
+   * True while previews are re-rendering after a re-cluster. Keeps the
+   * cropping view mounted (with placeholders) and its buttons disabled so the
+   * user can't crop against stale previews.
+   */
+  isReclustering: boolean;
   previews: ClusterPreview[];
   progressDone: number;
   progressTotal: number;
@@ -49,6 +58,7 @@ interface WorkspaceState {
   zoomOut: () => void;
   resetZoom: () => void;
   fitToWindow: () => void;
+  reclusterWithExcludes: (excludes: ReadonlySet<number>) => void;
   cropAndSave: () => Promise<void>;
   exportCropSettings: () => Promise<void>;
   importCropSettings: (file: File) => Promise<void>;
@@ -56,10 +66,14 @@ interface WorkspaceState {
   reset: () => void;
 }
 
+const EMPTY_EXCLUDES: ReadonlySet<number> = new Set();
+
 export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   status: "idle",
   source: null,
   clusters: [],
+  excludes: EMPTY_EXCLUDES,
+  isReclustering: false,
   previews: [],
   progressDone: 0,
   progressTotal: 0,
@@ -69,12 +83,22 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   lastImport: null,
   setSource: (source) => {
     useCropStore.getState().clearAll();
-    // A new document resets zoom to its auto-fit baseline and clears any
-    // stale import notice.
-    set({ source, status: "clustering", error: null, zoom: 1, lastImport: null });
+    set({
+      source,
+      excludes: EMPTY_EXCLUDES,
+      clusters: clusterPages(source.pages, EMPTY_EXCLUDES),
+      previews: [],
+      status: "clustering",
+      isReclustering: false,
+      error: null,
+      // A new document resets zoom to its auto-fit baseline and clears any
+      // stale import notice.
+      zoom: 1,
+      lastImport: null,
+    });
   },
   setClusters: (clusters) => set({ clusters }),
-  setPreviews: (previews) => set({ previews, status: "ready" }),
+  setPreviews: (previews) => set({ previews, status: "ready", isReclustering: false }),
   setStatus: (status) => set({ status }),
   setProgress: (progressDone, progressTotal) => set({ progressDone, progressTotal }),
   setError: (error) => set({ error, status: "error" }),
@@ -85,6 +109,33 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   // zoom = 1 is the auto-fit baseline, so reset and fit are the same target.
   resetZoom: () => set({ zoom: 1 }),
   fitToWindow: () => set({ zoom: 1 }),
+  reclusterWithExcludes: (excludes) => {
+    const state = get();
+    if (!state.source) return;
+    const next = new Set(excludes);
+    const newClusters = clusterPages(state.source.pages, next);
+
+    // Carry already-drawn crop rects over to the new clusters by matching
+    // (parity, roundedW, roundedH). Runs here (not in the render effect) so it
+    // happens exactly once per re-cluster — React StrictMode double-invokes
+    // effects in dev, which would otherwise lose rects on the second pass.
+    // Fresh ids avoid collisions when several old clusters collapse into one.
+    const transferred = transferRectsBySize(state.clusters, newClusters, useCropStore.getState().rectsByCluster);
+    const rectsByCluster: Record<string, CropRect[]> = {};
+    for (const [clusterId, shapes] of Object.entries(transferred)) {
+      rectsByCluster[clusterId] = shapes.map((s) => ({ id: newRectId(), ...s }));
+    }
+    useCropStore.getState().replaceAllRects(rectsByCluster);
+
+    set({
+      excludes: next,
+      clusters: newClusters,
+      previews: [],
+      status: "ready",
+      isReclustering: true,
+      error: null,
+    });
+  },
   cropAndSave: async () => {
     const state = get();
     if (!state.source) return;
@@ -170,6 +221,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       status: "idle",
       source: null,
       clusters: [],
+      excludes: EMPTY_EXCLUDES,
+      isReclustering: false,
       previews: [],
       progressDone: 0,
       progressTotal: 0,

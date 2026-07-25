@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useWorkspaceStore, ZOOM_STEP } from "@/store/workspaceStore";
 import { useCropStore } from "@/store/cropStore";
 import { usePdfLoader } from "@/hooks/usePdfLoader";
+import { parsePageExcludes } from "@/lib/pdf/cluster";
 import ClusterPanel from "@/components/ClusterPanel";
 import "./CroppingView.css";
 
@@ -10,6 +11,7 @@ export default function CroppingView() {
   const clusters = useWorkspaceStore((s) => s.clusters);
   const previews = useWorkspaceStore((s) => s.previews);
   const status = useWorkspaceStore((s) => s.status);
+  const isReclustering = useWorkspaceStore((s) => s.isReclustering);
   const error = useWorkspaceStore((s) => s.error);
   const lastCrop = useWorkspaceStore((s) => s.lastCrop);
   const cropAndSave = useWorkspaceStore((s) => s.cropAndSave);
@@ -21,6 +23,7 @@ export default function CroppingView() {
   const importCropSettings = useWorkspaceStore((s) => s.importCropSettings);
   const lastImport = useWorkspaceStore((s) => s.lastImport);
   const dismissImportNotice = useWorkspaceStore((s) => s.dismissImportNotice);
+  const recluster = useWorkspaceStore((s) => s.reclusterWithExcludes);
   const syncSizes = useCropStore((s) => s.syncSizes);
   const setSyncSizes = useCropStore((s) => s.setSyncSizes);
   const propagateSizeFromRect = useCropStore((s) => s.propagateSizeFromRect);
@@ -40,6 +43,9 @@ export default function CroppingView() {
   const [isDragging, setIsDragging] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
   const dragDepth = useRef(0);
+  const [excludeModalOpen, setExcludeModalOpen] = useState(false);
+  const [excludeInput, setExcludeInput] = useState("");
+  const [excludeError, setExcludeError] = useState<string | null>(null);
 
   // Ctrl/Cmd + wheel zooms; a plain wheel scrolls the container as usual.
   useEffect(() => {
@@ -98,6 +104,10 @@ export default function CroppingView() {
     return map;
   }, [previews]);
 
+  // Disable mutating actions while previews are stale (re-clustering) or a
+  // crop/export is in flight.
+  const busy = status === "cropping" || isReclustering;
+
   const toggleSync = (v: boolean) => {
     setSyncSizes(v);
     if (!v) return;
@@ -129,6 +139,23 @@ export default function CroppingView() {
         fixedLeft: true,
         fixedTop: true,
       });
+    }
+  };
+
+  const openExcludeModal = () => {
+    const current = useWorkspaceStore.getState().excludes;
+    setExcludeInput(current.size ? formatExcludes(current) : "");
+    setExcludeError(null);
+    setExcludeModalOpen(true);
+  };
+
+  const submitExcludes = () => {
+    try {
+      const excludes = parsePageExcludes(excludeInput);
+      recluster(excludes);
+      setExcludeModalOpen(false);
+    } catch (err) {
+      setExcludeError(err instanceof Error ? err.message : String(err));
     }
   };
 
@@ -188,6 +215,56 @@ export default function CroppingView() {
           </div>
         </div>
       )}
+      {excludeModalOpen && (
+        <div
+          className="cropping-view__overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Exclude pages"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setExcludeModalOpen(false);
+          }}
+        >
+          <div className="cropping-view__prompt">
+            <label className="cropping-view__prompt-label" htmlFor="exclude-input">
+              Exclude pages
+            </label>
+            <p className="cropping-view__prompt-hint">
+              Pages listed here are forced into their own singleton clusters so they don’t pollute the merged preview.
+              Syntax: <code>1-4;6;9</code>
+            </p>
+            <input
+              id="exclude-input"
+              className="cropping-view__prompt-input"
+              type="text"
+              autoFocus
+              value={excludeInput}
+              placeholder="e.g. 1-4;6;9"
+              onChange={(e) => {
+                setExcludeInput(e.target.value);
+                setExcludeError(null);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  submitExcludes();
+                } else if (e.key === "Escape") {
+                  setExcludeModalOpen(false);
+                }
+              }}
+            />
+            {excludeError && <div className="cropping-view__prompt-error">{excludeError}</div>}
+            <div className="cropping-view__prompt-actions">
+              <button type="button" className="cropping-view__secondary" onClick={() => setExcludeModalOpen(false)}>
+                Cancel
+              </button>
+              <button type="button" className="cropping-view__primary" onClick={submitExcludes}>
+                Re-cluster
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <header className="cropping-view__header">
         <h1 className="cropping-view__title">{source.fileName}</h1>
         <span className="cropping-view__count">
@@ -243,17 +320,21 @@ export default function CroppingView() {
         <button
           type="button"
           className="cropping-view__secondary"
-          disabled={status === "cropping"}
+          disabled={busy}
+          onClick={openExcludeModal}
+          title="Re-cluster, forcing selected pages into their own singleton clusters"
+        >
+          Re-cluster with excludes
+        </button>
+        <button
+          type="button"
+          className="cropping-view__secondary"
+          disabled={busy}
           onClick={() => fileInputRef.current?.click()}
         >
           Load new PDF
         </button>
-        <button
-          type="button"
-          className="cropping-view__primary"
-          disabled={status === "cropping"}
-          onClick={() => void cropAndSave()}
-        >
+        <button type="button" className="cropping-view__primary" disabled={busy} onClick={() => void cropAndSave()}>
           {status === "cropping" ? "Cropping…" : "Crop PDF"}
         </button>
       </header>
@@ -306,4 +387,21 @@ export default function CroppingView() {
       </div>
     </div>
   );
+}
+
+/**
+ * Render the current exclude set back into Briss syntax (`1-4;6;9`) by
+ * collapsing consecutive page numbers into ranges.
+ */
+function formatExcludes(excludes: ReadonlySet<number>): string {
+  const sorted = [...excludes].sort((a, b) => a - b);
+  const tokens: string[] = [];
+  let i = 0;
+  while (i < sorted.length) {
+    let j = i;
+    while (j + 1 < sorted.length && sorted[j + 1]! === sorted[j]! + 1) j++;
+    tokens.push(j > i ? `${sorted[i]!}-${sorted[j]!}` : `${sorted[i]!}`);
+    i = j + 1;
+  }
+  return tokens.join(";");
 }

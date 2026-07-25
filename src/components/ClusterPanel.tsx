@@ -513,6 +513,7 @@ export default function ClusterPanel({ cluster, preview, previewUrl }: Props) {
           return (
             <g key={r.id}>
               <rect
+                className="cluster-panel__crop-rect"
                 x={r.x}
                 y={r.y}
                 width={r.w}
@@ -557,9 +558,13 @@ export default function ClusterPanel({ cluster, preview, previewUrl }: Props) {
         })}
       </svg>
       <div className="cluster-panel__meta">
-        <strong>{cluster.parity === "odd" ? "Odd" : "Even"}</strong>
+        {cluster.excluded ? (
+          <strong className="cluster-panel__excluded">Excluded</strong>
+        ) : (
+          <strong>{cluster.parity === "odd" ? "Odd" : "Even"}</strong>
+        )}
         {" · "}
-        {cluster.allPages.length} pages
+        {cluster.allPages.length} page{cluster.allPages.length === 1 ? "" : "s"}
         {" · "}
         {cluster.width.toFixed(0)} × {cluster.height.toFixed(0)}
       </div>

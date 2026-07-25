@@ -43,4 +43,69 @@ test.describe("PDF crop happy path", () => {
     ]);
     expect(download.suggestedFilename()).toBe("sample_cropped.pdf");
   });
+
+  test("re-clusters with excluded pages, forcing them into singleton clusters", async ({ page }) => {
+    test.setTimeout(60_000);
+    await page.goto("/");
+    await page.locator('input[type="file"]').first().setInputFiles(SAMPLE_PDF);
+    await expect(page.locator(".cropping-view__title")).toHaveText("sample.pdf", { timeout: 30_000 });
+
+    // Initially the 4-page fixture yields two parity clusters (odd + even).
+    await expect(page.locator(".cropping-view__count")).toContainText("2 clusters");
+
+    // Open the exclude prompt and exclude page 2.
+    await page.getByRole("button", { name: "Re-cluster with excludes" }).click();
+    const prompt = page.locator(".cropping-view__prompt");
+    const input = prompt.locator("#exclude-input");
+    await expect(input).toBeVisible();
+    await input.fill("2");
+    await prompt.getByRole("button", { name: "Re-cluster" }).click();
+
+    // Page 2 becomes its own singleton, so the count rises to 3.
+    await expect(page.locator(".cropping-view__count")).toContainText("3 clusters", { timeout: 30_000 });
+
+    // The excluded singleton is labelled as such.
+    await expect(page.locator(".cluster-panel__excluded")).toHaveCount(1);
+
+    // The prompt closed.
+    await expect(prompt).toHaveCount(0);
+  });
+
+  test("preserves already-drawn crop rects across a re-cluster", async ({ page }) => {
+    test.setTimeout(60_000);
+    await page.goto("/");
+    await page.locator('input[type="file"]').first().setInputFiles(SAMPLE_PDF);
+    await expect(page.locator(".cropping-view__count")).toContainText("2 clusters", { timeout: 30_000 });
+
+    // Each cluster auto-seeds one crop rect on mount.
+    await expect(page.locator(".cluster-panel__crop-rect")).toHaveCount(2);
+
+    // Draw a second rect on the first (odd) cluster so it carries a rect that
+    // auto-seed alone would not reproduce after re-clustering.
+    const oddSvg = page.locator(".cluster-panel__svg").first();
+    const box = (await oddSvg.boundingBox())!;
+    const x0 = box.x + box.width * 0.2;
+    const y0 = box.y + box.height * 0.2;
+    const x1 = box.x + box.width * 0.8;
+    const y1 = box.y + box.height * 0.8;
+    await page.mouse.move(x0, y0);
+    await page.mouse.down();
+    await page.mouse.move(x1, y1, { steps: 5 });
+    await page.mouse.up();
+    // Odd cluster now has two rects, even still has one.
+    await expect(page.locator(".cluster-panel__crop-rect")).toHaveCount(3);
+
+    // Re-cluster excluding odd page 3. The old odd cluster's two rects must be
+    // carried to BOTH the shrunken odd cluster and the new excluded singleton
+    // (they share parity + size), while the even cluster keeps its single rect.
+    await page.getByRole("button", { name: "Re-cluster with excludes" }).click();
+    const prompt = page.locator(".cropping-view__prompt");
+    await prompt.locator("#exclude-input").fill("3");
+    await prompt.getByRole("button", { name: "Re-cluster" }).click();
+
+    await expect(page.locator(".cropping-view__count")).toContainText("3 clusters", { timeout: 30_000 });
+    // 2 (odd) + 2 (excluded singleton, inherited) + 1 (even) = 5. If transfer
+    // had failed, each new panel would auto-seed exactly one -> 3.
+    await expect(page.locator(".cluster-panel__crop-rect")).toHaveCount(5);
+  });
 });

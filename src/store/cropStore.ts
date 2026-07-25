@@ -51,6 +51,11 @@ interface CropState {
   removeRect: (clusterId: string, rectId: string) => void;
   /** Replace a single rect with N rects (e.g. a split), preserving array order. */
   replaceRect: (clusterId: string, rectId: string, replacements: CropRect[]) => void;
+  /**
+   * Replace the entire per-cluster rect map (used when re-clustering, where
+   * cluster ids change). Resets selection since rect ids no longer match.
+   */
+  replaceAllRects: (rectsByCluster: ClusterCrops) => void;
   /** Shift+click: toggle a single rect's membership in the selection. */
   toggleSelect: (rectId: string) => void;
   /** Plain click: replace the selection with a single rect. */
@@ -157,6 +162,7 @@ export const useCropStore = create<CropState>((set) => ({
         selectedRectIds,
       };
     }),
+  replaceAllRects: (rectsByCluster) => set({ rectsByCluster, selectedRectIds: new Set() }),
   toggleSelect: (rectId) =>
     set((s) => {
       const selectedRectIds = new Set(s.selectedRectIds);

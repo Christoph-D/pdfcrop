@@ -54,6 +54,64 @@
   font-size: 14px;
 }
 
+.cropping-view__prompt {
+  background: #1f1f1f;
+  padding: 20px 24px;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(440px, 90vw);
+}
+
+.cropping-view__prompt-label {
+  color: #fff;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.cropping-view__prompt-hint {
+  margin: 0;
+  color: #b0b0b0;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.cropping-view__prompt-hint code {
+  background: #2b2b2b;
+  padding: 1px 5px;
+  border-radius: 3px;
+  color: #ffd6a8;
+}
+
+.cropping-view__prompt-input {
+  background: #2b2b2b;
+  color: #fff;
+  border: 1px solid #555;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 14px;
+  font-family: inherit;
+}
+
+.cropping-view__prompt-input:focus {
+  outline: none;
+  border-color: #4a9eff;
+}
+
+.cropping-view__prompt-error {
+  color: #ffd6d6;
+  font-size: 12px;
+}
+
+.cropping-view__prompt-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
 .cropping-view__spinner {
   width: 28px;
   height: 28px;

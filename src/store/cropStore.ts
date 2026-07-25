@@ -28,11 +28,17 @@ interface CropState {
   selectedClusterId: string | null;
   selectedRectId: string | null;
   syncSizes: boolean;
+  /** In-memory clipboard for copying crop-rect layouts between clusters. */
+  clipboard: CropRect[];
   setRects: (clusterId: string, rects: CropRect[]) => void;
   addRect: (clusterId: string, rect: CropRect) => void;
   updateRect: (clusterId: string, rectId: string, patch: Partial<CropRect>) => void;
   removeRect: (clusterId: string, rectId: string) => void;
   select: (clusterId: string | null, rectId: string | null) => void;
+  /** Replaces the clipboard with the currently selected rects (clears first). */
+  copy: () => void;
+  /** Appends copies of the clipboard rects to the active cluster, unselected. */
+  paste: () => void;
   clearAll: () => void;
   setSyncSizes: (v: boolean) => void;
   propagateSizeFromRect: (
@@ -53,6 +59,7 @@ export const useCropStore = create<CropState>((set) => ({
   selectedClusterId: null,
   selectedRectId: null,
   syncSizes: false,
+  clipboard: [],
   setRects: (clusterId, rects) =>
     set((s) => ({
       rectsByCluster: { ...s.rectsByCluster, [clusterId]: rects },
@@ -88,12 +95,44 @@ export const useCropStore = create<CropState>((set) => ({
       };
     }),
   select: (clusterId, rectId) => set({ selectedClusterId: clusterId, selectedRectId: rectId }),
+  copy: () =>
+    set((s) => {
+      const clusterId = s.selectedClusterId;
+      if (!clusterId) return { clipboard: [] };
+      const list = s.rectsByCluster[clusterId] ?? [];
+      // Mirrors Briss's copyToClipBoard: clear first, then snapshot the
+      // currently selected rects (their geometry, not their ids).
+      return {
+        clipboard: list.filter((r) => r.id === s.selectedRectId).map((r) => ({ ...r })),
+      };
+    }),
+  paste: () =>
+    set((s) => {
+      const clusterId = s.selectedClusterId;
+      if (!clusterId || s.clipboard.length === 0) return {};
+      // Mirrors Briss's pasteFromClipBoard: append brand-new rects that copy
+      // the geometry but start unselected (new id, selection left untouched).
+      const pasted: CropRect[] = s.clipboard.map(({ x, y, w, h }) => ({
+        id: newRectId(),
+        x,
+        y,
+        w,
+        h,
+      }));
+      return {
+        rectsByCluster: {
+          ...s.rectsByCluster,
+          [clusterId]: [...(s.rectsByCluster[clusterId] ?? []), ...pasted],
+        },
+      };
+    }),
   clearAll: () =>
     set({
       rectsByCluster: {},
       selectedClusterId: null,
       selectedRectId: null,
       syncSizes: false,
+      clipboard: [],
     }),
   setSyncSizes: (v) => set({ syncSizes: v }),
   propagateSizeFromRect: (sourceClusterId, sourceRectId, dimsByCluster, anchor) =>

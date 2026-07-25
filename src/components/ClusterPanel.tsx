@@ -103,6 +103,8 @@ export default function ClusterPanel({ cluster, preview, previewUrl }: Props) {
   const updateRect = useCropStore((s) => s.updateRect);
   const removeRect = useCropStore((s) => s.removeRect);
   const select = useCropStore((s) => s.select);
+  const copy = useCropStore((s) => s.copy);
+  const paste = useCropStore((s) => s.paste);
   const propagateSizeFromRect = useCropStore((s) => s.propagateSizeFromRect);
 
   const svgRef = useRef<SVGSVGElement>(null);
@@ -325,15 +327,31 @@ export default function ClusterPanel({ cluster, preview, previewUrl }: Props) {
     [cluster.id, removeRect],
   );
 
-  // Delete selected rect on Delete key.
+  // Keyboard shortcuts: Delete the selected rect, Escape to deselect, and
+  // Ctrl/Cmd+C / Ctrl/Cmd+V to copy/paste crop-rect layouts in memory.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Delete" && e.key !== "Backspace" && e.key !== "Escape") return;
-      const sel = useCropStore.getState();
+      const key = e.key.toLowerCase();
+      const isCopyPaste = (key === "c" || key === "v") && (e.ctrlKey || e.metaKey);
+      if (e.key !== "Delete" && e.key !== "Backspace" && e.key !== "Escape" && !isCopyPaste) return;
+
       if (e.key === "Escape") {
         select(null, null);
         return;
       }
+
+      if (isCopyPaste) {
+        // Swallow the keypress on every panel so the browser's real (OS)
+        // clipboard is never touched. Only the active cluster acts.
+        e.preventDefault();
+        const sel = useCropStore.getState();
+        if (sel.selectedClusterId !== cluster.id) return;
+        if (key === "c") copy();
+        else paste();
+        return;
+      }
+
+      const sel = useCropStore.getState();
       if (sel.selectedClusterId === cluster.id && sel.selectedRectId) {
         e.preventDefault();
         removeRect(cluster.id, sel.selectedRectId);
@@ -341,7 +359,7 @@ export default function ClusterPanel({ cluster, preview, previewUrl }: Props) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [cluster.id, removeRect, select]);
+  }, [cluster.id, copy, paste, removeRect, select]);
 
   const cursor = cursorFor(hoverHandle);
 

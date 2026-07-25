@@ -559,6 +559,12 @@ export default function ClusterPanel({ cluster, preview, previewUrl }: Props) {
           const tooSmall = !hasEnoughSpaceForHandles(r);
           const fill = tooSmall ? "rgba(220, 50, 50, 0.25)" : "rgba(60, 130, 220, 0.25)";
           const stroke = selected ? "#000" : "rgba(60,130,220,0.9)";
+          // Lower-left dimension/aspect annotation. Computed up front so the
+          // translucent background can be sized to cover the glyphs.
+          const sizeLabel = selected ? formatCropSizeLabel(r) : "";
+          const sizeLabelFontSize = Math.min(12, Math.max(8, r.h / 10));
+          // Approximate sans-serif advance so the background covers the text.
+          const sizeLabelWidth = sizeLabel.length * sizeLabelFontSize * 0.6 + 4;
           return (
             <g key={r.id}>
               <rect
@@ -581,20 +587,23 @@ export default function ClusterPanel({ cluster, preview, previewUrl }: Props) {
               >
                 {idx + 1}
               </text>
-              {/* Size label on selected rects. Port of DrawableCropRect.drawSelectionOverlay. */}
+              {/* Size label on selected rects. Port of DrawableCropRect.drawSelectionOverlay.
+                  Drawn over a translucent background so it stays legible over
+                  arbitrary page content (light background + dark text). */}
               {selected && (
-                <text
-                  x={r.x + 4}
-                  y={r.y + r.h - 4}
-                  fill="#ffd400"
-                  stroke="#000"
-                  strokeWidth={0.5}
-                  paintOrder="stroke"
-                  fontSize={Math.min(12, Math.max(8, r.h / 10))}
-                  fontFamily="sans-serif"
-                >
-                  {formatCropSizeLabel(r)}
-                </text>
+                <g>
+                  <rect
+                    x={r.x + 2}
+                    y={r.y + r.h - 4 - sizeLabelFontSize}
+                    width={sizeLabelWidth}
+                    height={sizeLabelFontSize + 2}
+                    rx={1.5}
+                    fill="rgba(255, 255, 255, 0.75)"
+                  />
+                  <text x={r.x + 4} y={r.y + r.h - 4} fill="#111" fontSize={sizeLabelFontSize} fontFamily="sans-serif">
+                    {sizeLabel}
+                  </text>
+                </g>
               )}
               {selected &&
                 (

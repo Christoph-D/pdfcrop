@@ -1,53 +1,203 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { useCropStore, type CropRect } from "./cropStore";
+import { useCropStore, type CropRect, type RectDelta } from "./cropStore";
 
 function rect(id: string, x: number, y: number, w: number, h: number): CropRect {
   return { id, x, y, w, h };
 }
+
+const A = "A";
+const B = "B";
+
+beforeEach(() => {
+  useCropStore.getState().clearAll();
+  useCropStore.setState({
+    rectsByCluster: {
+      [A]: [rect("a1", 10, 10, 40, 60), rect("a2", 100, 100, 50, 50)],
+      [B]: [rect("b1", 20, 20, 30, 30)],
+    },
+  });
+});
+
+describe("selection actions", () => {
+  it("toggleSelect adds then removes a rect", () => {
+    const { toggleSelect } = useCropStore.getState();
+    toggleSelect("a1");
+    expect(useCropStore.getState().selectedRectIds.has("a1")).toBe(true);
+    toggleSelect("a1");
+    expect(useCropStore.getState().selectedRectIds.has("a1")).toBe(false);
+  });
+
+  it("toggleSelect across clusters builds a global set", () => {
+    const { toggleSelect } = useCropStore.getState();
+    toggleSelect("a1");
+    toggleSelect("b1");
+    expect([...useCropStore.getState().selectedRectIds].sort()).toEqual(["a1", "b1"]);
+  });
+
+  it("selectOnly replaces the whole selection", () => {
+    const { toggleSelect, selectOnly } = useCropStore.getState();
+    toggleSelect("a1");
+    toggleSelect("a2");
+    selectOnly("b1");
+    expect([...useCropStore.getState().selectedRectIds]).toEqual(["b1"]);
+  });
+
+  it("clearSelection empties the set", () => {
+    const { toggleSelect, clearSelection } = useCropStore.getState();
+    toggleSelect("a1");
+    toggleSelect("b1");
+    clearSelection();
+    expect(useCropStore.getState().selectedRectIds.size).toBe(0);
+  });
+});
+
+describe("removeRect prunes selection", () => {
+  it("drops the removed id from selectedRectIds", () => {
+    const { toggleSelect, removeRect } = useCropStore.getState();
+    toggleSelect("a1");
+    toggleSelect("b1");
+    removeRect(A, "a1");
+    expect([...useCropStore.getState().selectedRectIds]).toEqual(["b1"]);
+    expect(useCropStore.getState().rectsByCluster[A]!.map((r) => r.id)).toEqual(["a2"]);
+  });
+});
+
+describe("removeSelectedRects", () => {
+  it("deletes every selected rect across all clusters and clears selection", () => {
+    const { toggleSelect, removeSelectedRects } = useCropStore.getState();
+    toggleSelect("a2");
+    toggleSelect("b1");
+    removeSelectedRects();
+    const s = useCropStore.getState();
+    expect(s.rectsByCluster[A]!.map((r) => r.id)).toEqual(["a1"]);
+    expect(s.rectsByCluster[B]).toEqual([]);
+    expect(s.selectedRectIds.size).toBe(0);
+  });
+});
+
+describe("applyDeltaToSelectionExcept", () => {
+  const dims = {
+    [A]: { imgW: 200, imgH: 200 },
+    [B]: { imgW: 400, imgH: 400 },
+  };
+
+  function origins(): Record<string, { x: number; y: number; w: number; h: number }> {
+    const map: Record<string, { x: number; y: number; w: number; h: number }> = {};
+    for (const list of Object.values(useCropStore.getState().rectsByCluster)) {
+      for (const r of list) map[r.id] = { x: r.x, y: r.y, w: r.w, h: r.h };
+    }
+    return map;
+  }
+
+  it("broadcasts a move delta to every other selected rect", () => {
+    const { toggleSelect, applyDeltaToSelectionExcept } = useCropStore.getState();
+    toggleSelect("a1");
+    toggleSelect("a2");
+    toggleSelect("b1");
+    const delta: RectDelta = { dx: 5, dy: 7, dw: 0, dh: 0 };
+    applyDeltaToSelectionExcept("a1", delta, origins(), dims);
+
+    const s = useCropStore.getState();
+    // source rect (a1) is updated by the panel, not here — left untouched.
+    expect(s.rectsByCluster[A]!.find((r) => r.id === "a1")).toEqual(rect("a1", 10, 10, 40, 60));
+    // other selected rects move by the same delta.
+    expect(s.rectsByCluster[A]!.find((r) => r.id === "a2")).toEqual(rect("a2", 105, 107, 50, 50));
+    expect(s.rectsByCluster[B]!.find((r) => r.id === "b1")).toEqual(rect("b1", 25, 27, 30, 30));
+  });
+
+  it("broadcasts a resize delta anchored top-left (se handle)", () => {
+    const { toggleSelect, applyDeltaToSelectionExcept } = useCropStore.getState();
+    toggleSelect("a1");
+    toggleSelect("b1");
+    const delta: RectDelta = { dx: 0, dy: 0, dw: 10, dh: 20 };
+    applyDeltaToSelectionExcept("a1", delta, origins(), dims);
+
+    const s = useCropStore.getState();
+    expect(s.rectsByCluster[A]!.find((r) => r.id === "a1")).toEqual(rect("a1", 10, 10, 40, 60));
+    expect(s.rectsByCluster[B]!.find((r) => r.id === "b1")).toEqual(rect("b1", 20, 20, 40, 50));
+  });
+
+  it("clamps each rect to its own cluster image bounds", () => {
+    // The source (a1) is updated by the panel, not the broadcast, so it is
+    // left untouched. The other selected rects move by the same delta but are
+    // each clamped to their own cluster's image size.
+    const { toggleSelect, applyDeltaToSelectionExcept } = useCropStore.getState();
+    toggleSelect("a1");
+    toggleSelect("a2");
+    toggleSelect("b1");
+    const delta: RectDelta = { dx: 500, dy: 0, dw: 0, dh: 0 };
+    applyDeltaToSelectionExcept("a1", delta, origins(), dims);
+
+    const s = useCropStore.getState();
+    // source rect is untouched.
+    expect(s.rectsByCluster[A]!.find((r) => r.id === "a1")!.x).toBe(10);
+    // a2 (x=100, w=50 in a 200x200 image) clamps to 200-50 = 150.
+    expect(s.rectsByCluster[A]!.find((r) => r.id === "a2")!.x).toBe(150);
+    // b1 (x=20, w=30 in a 400x400 image) clamps to 400-30 = 370.
+    expect(s.rectsByCluster[B]!.find((r) => r.id === "b1")!.x).toBe(370);
+  });
+
+  it("ignores rects that are not selected", () => {
+    const { applyDeltaToSelectionExcept } = useCropStore.getState();
+    const delta: RectDelta = { dx: 50, dy: 50, dw: 0, dh: 0 };
+    applyDeltaToSelectionExcept("a1", delta, origins(), dims);
+
+    const s = useCropStore.getState();
+    expect(s.rectsByCluster[A]!.find((r) => r.id === "a2")).toEqual(rect("a2", 100, 100, 50, 50));
+    expect(s.rectsByCluster[B]!.find((r) => r.id === "b1")).toEqual(rect("b1", 20, 20, 30, 30));
+  });
+
+  it("is a no-op when only the source rect is selected", () => {
+    const { selectOnly, applyDeltaToSelectionExcept } = useCropStore.getState();
+    selectOnly("a1");
+    const before = useCropStore.getState().rectsByCluster;
+    applyDeltaToSelectionExcept("a1", { dx: 99, dy: 99, dw: 99, dh: 99 }, origins(), dims);
+    expect(useCropStore.getState().rectsByCluster).toBe(before);
+  });
+});
 
 describe("cropStore copy/paste", () => {
   beforeEach(() => {
     useCropStore.getState().clearAll();
   });
 
-  it("copies the currently selected rect (clears the clipboard first)", () => {
+  it("copies every selected rect (clears the clipboard first)", () => {
     useCropStore.setState({
       rectsByCluster: {
         a: [rect("r1", 10, 20, 30, 40), rect("r2", 50, 60, 70, 80)],
         b: [rect("r3", 1, 2, 3, 4)],
       },
-      selectedClusterId: "a",
-      selectedRectId: "r2",
+      selectedRectIds: new Set(["r2", "r3"]),
       clipboard: [rect("stale", 0, 0, 1, 1)],
     });
 
     useCropStore.getState().copy();
 
-    expect(useCropStore.getState().clipboard).toEqual([rect("r2", 50, 60, 70, 80)]);
+    // Geometry only (ids dropped), order follows cluster iteration.
+    expect(useCropStore.getState().clipboard).toEqual([
+      { x: 50, y: 60, w: 70, h: 80 },
+      { x: 1, y: 2, w: 3, h: 4 },
+    ]);
   });
 
-  it("does not touch the OS clipboard (in-memory only)", () => {
-    // The store has no external clipboard dependency; copying only mutates
-    // `clipboard`. This is structural: there is nothing to assert beyond the
-    // state, covered above, so just confirm the snapshot lives in state.
+  it("copy with no selection clears the clipboard", () => {
     useCropStore.setState({
       rectsByCluster: { a: [rect("r1", 1, 2, 3, 4)] },
-      selectedClusterId: "a",
-      selectedRectId: "r1",
+      selectedRectIds: new Set(),
+      clipboard: [rect("stale", 0, 0, 1, 1)],
     });
     useCropStore.getState().copy();
-    expect(useCropStore.getState().clipboard).toHaveLength(1);
+    expect(useCropStore.getState().clipboard).toEqual([]);
   });
 
-  it("pastes copies into the active cluster with fresh ids, starting unselected", () => {
+  it("pastes copies into the target cluster with fresh ids, starting unselected", () => {
     useCropStore.setState({
       rectsByCluster: { a: [rect("r1", 10, 20, 30, 40)] },
-      selectedClusterId: "a",
-      selectedRectId: "r1",
+      selectedRectIds: new Set(["r1"]),
       clipboard: [rect("clip-1", 10, 20, 30, 40), rect("clip-2", 100, 200, 5, 6)],
     });
 
-    useCropStore.getState().paste();
+    useCropStore.getState().paste("a");
 
     const list = useCropStore.getState().rectsByCluster.a!;
     expect(list).toHaveLength(3);
@@ -60,20 +210,18 @@ describe("cropStore copy/paste", () => {
     expect(list[2]!.id).not.toBe("clip-2");
     expect(list[1]!.id).not.toBe(list[2]!.id);
     // Selection is left untouched (pasted rects start unselected).
-    expect(useCropStore.getState().selectedRectId).toBe("r1");
+    expect(useCropStore.getState().selectedRectIds.has("r1")).toBe(true);
   });
 
-  it("copies between clusters: copy from one, select another, paste", () => {
+  it("copies between clusters: copy from one, paste into another", () => {
     useCropStore.setState({
       rectsByCluster: { a: [rect("r1", 11, 22, 33, 44)], b: [] },
-      selectedClusterId: "a",
-      selectedRectId: "r1",
+      selectedRectIds: new Set(["r1"]),
     });
     useCropStore.getState().copy();
 
-    // Switch active cluster to b (e.g. by clicking it) and paste.
-    useCropStore.setState({ selectedClusterId: "b", selectedRectId: null });
-    useCropStore.getState().paste();
+    // Paste into cluster b.
+    useCropStore.getState().paste("b");
 
     const b = useCropStore.getState().rectsByCluster.b!;
     expect(b).toHaveLength(1);
@@ -83,22 +231,9 @@ describe("cropStore copy/paste", () => {
   it("paste is a no-op when the clipboard is empty", () => {
     useCropStore.setState({
       rectsByCluster: { a: [rect("r1", 1, 2, 3, 4)] },
-      selectedClusterId: "a",
-      selectedRectId: "r1",
       clipboard: [],
     });
-    useCropStore.getState().paste();
+    useCropStore.getState().paste("a");
     expect(useCropStore.getState().rectsByCluster.a).toHaveLength(1);
-  });
-
-  it("copy with no selection clears the clipboard", () => {
-    useCropStore.setState({
-      rectsByCluster: { a: [rect("r1", 1, 2, 3, 4)] },
-      selectedClusterId: "a",
-      selectedRectId: null,
-      clipboard: [rect("stale", 0, 0, 1, 1)],
-    });
-    useCropStore.getState().copy();
-    expect(useCropStore.getState().clipboard).toEqual([]);
   });
 });

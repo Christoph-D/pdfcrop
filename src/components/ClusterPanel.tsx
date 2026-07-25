@@ -11,7 +11,7 @@ import {
   ratiosToPixelRect,
 } from "@/lib/pdf/ratios";
 import { FIT_PADDING, useWorkspaceStore } from "@/store/workspaceStore";
-import { newRectId, useCropStore, type CropRect, type SizeAnchor } from "@/store/cropStore";
+import { newRectId, useCropStore, type CropRect, type RectDelta, type SizeAnchor } from "@/store/cropStore";
 import "./ClusterPanel.css";
 
 type Handle = "move" | "nw" | "ne" | "sw" | "se" | "edge-n" | "edge-s" | "edge-e" | "edge-w" | "draw";
@@ -92,18 +92,75 @@ function anchorForHandle(handle: Handle): SizeAnchor {
   }
 }
 
+/**
+ * Translate a mouse delta (from drag start) into the per-axis geometry delta
+ * for a given handle. This is the broadcast mapping: every selected rect
+ * receives the same `{dx, dy, dw, dh}` regardless of which cluster it lives in.
+ * Mirrors Briss's moveSelectedRects / resizeSelRects / resizeAndMoveSelectedRects.
+ */
+function deltaForHandle(handle: Handle, dx: number, dy: number): RectDelta {
+  switch (handle) {
+    case "move":
+      return { dx, dy, dw: 0, dh: 0 };
+    case "nw":
+      return { dx, dy, dw: -dx, dh: -dy };
+    case "ne":
+      return { dx: 0, dy, dw: dx, dh: -dy };
+    case "sw":
+      return { dx, dy: 0, dw: -dx, dh: dy };
+    case "se":
+      return { dx: 0, dy: 0, dw: dx, dh: dy };
+    case "edge-n":
+      return { dx: 0, dy, dw: 0, dh: -dy };
+    case "edge-s":
+      return { dx: 0, dy: 0, dw: 0, dh: dy };
+    case "edge-w":
+      return { dx, dy: 0, dw: -dx, dh: 0 };
+    case "edge-e":
+      return { dx: 0, dy: 0, dw: dx, dh: 0 };
+    default:
+      return { dx: 0, dy: 0, dw: 0, dh: 0 };
+  }
+}
+
+/** Snapshot the current geometry of every selected rect (across all clusters). */
+function captureOrigins(): Record<string, PixelRect> {
+  const { rectsByCluster, selectedRectIds } = useCropStore.getState();
+  if (selectedRectIds.size === 0) return {};
+  const origins: Record<string, PixelRect> = {};
+  for (const list of Object.values(rectsByCluster)) {
+    for (const r of list) {
+      if (selectedRectIds.has(r.id)) origins[r.id] = { x: r.x, y: r.y, w: r.w, h: r.h };
+    }
+  }
+  return origins;
+}
+
+/** Build { clusterId -> image dims } from the rendered previews. */
+function buildDimsByCluster(): Record<string, { imgW: number; imgH: number }> {
+  const dimsByCluster: Record<string, { imgW: number; imgH: number }> = {};
+  for (const p of useWorkspaceStore.getState().previews) {
+    dimsByCluster[p.clusterId] = { imgW: p.preview.width, imgH: p.preview.height };
+  }
+  return dimsByCluster;
+}
+
 export default function ClusterPanel({ cluster, preview, previewUrl }: Props) {
   const imgW = preview.width;
   const imgH = preview.height;
   const zoom = useWorkspaceStore((s) => s.zoom);
   const rects = useCropStore((s) => s.rectsByCluster[cluster.id] ?? []);
-  const selectedRectId = useCropStore((s) => s.selectedRectId);
-  const selectedClusterId = useCropStore((s) => s.selectedClusterId);
+  const selectedRectIds = useCropStore((s) => s.selectedRectIds);
   const syncSizes = useCropStore((s) => s.syncSizes);
   const addRect = useCropStore((s) => s.addRect);
   const updateRect = useCropStore((s) => s.updateRect);
   const removeRect = useCropStore((s) => s.removeRect);
-  const select = useCropStore((s) => s.select);
+  const toggleSelect = useCropStore((s) => s.toggleSelect);
+  const selectOnly = useCropStore((s) => s.selectOnly);
+  const clearSelection = useCropStore((s) => s.clearSelection);
+  const removeSelectedRects = useCropStore((s) => s.removeSelectedRects);
+  const applyDeltaToSelectionExcept = useCropStore((s) => s.applyDeltaToSelectionExcept);
+  const setActiveCluster = useCropStore((s) => s.setActiveCluster);
   const copy = useCropStore((s) => s.copy);
   const paste = useCropStore((s) => s.paste);
   const propagateSizeFromRect = useCropStore((s) => s.propagateSizeFromRect);
@@ -115,6 +172,7 @@ export default function ClusterPanel({ cluster, preview, previewUrl }: Props) {
     startX: number;
     startY: number;
     orig: PixelRect | null;
+    origins: Record<string, PixelRect>;
   } | null>(null);
   const [hoverHandle, setHoverHandle] = useState<Handle | null>(null);
 
@@ -151,13 +209,15 @@ export default function ClusterPanel({ cluster, preview, previewUrl }: Props) {
     (e: React.PointerEvent<SVGSVGElement>) => {
       e.preventDefault();
       svgRef.current?.setPointerCapture(e.pointerId);
+      // This panel is now the paste target.
+      setActiveCluster(cluster.id);
       const { x, y } = toImageCoords(e.clientX, e.clientY);
 
       // Iterate rects in reverse so newest is hit first.
       let chosen: { rect: CropRect; handle: Handle } | null = null;
       for (let i = rects.length - 1; i >= 0; i--) {
         const r = rects[i]!;
-        const isSelected = selectedClusterId === cluster.id && selectedRectId === r.id;
+        const isSelected = selectedRectIds.has(r.id);
         const handle = hitTest(r, x, y, isSelected);
         if (handle) {
           chosen = { rect: r, handle };
@@ -166,8 +226,17 @@ export default function ClusterPanel({ cluster, preview, previewUrl }: Props) {
       }
 
       if (chosen) {
-        if (chosen.handle === "move") {
-          select(cluster.id, chosen.rect.id);
+        // Shift+click toggles membership in the global selection and does not
+        // start a drag (mirrors Briss's changeSelectRectangle).
+        if (e.shiftKey) {
+          toggleSelect(chosen.rect.id);
+          return;
+        }
+        // Plain click: if the rect isn't already selected, replace the
+        // selection with it; otherwise keep the current group so a drag moves
+        // the whole set together.
+        if (!selectedRectIds.has(chosen.rect.id)) {
+          selectOnly(chosen.rect.id);
         }
         dragState.current = {
           handle: chosen.handle,
@@ -175,12 +244,13 @@ export default function ClusterPanel({ cluster, preview, previewUrl }: Props) {
           startX: x,
           startY: y,
           orig: { ...chosen.rect },
+          origins: captureOrigins(),
         };
         return;
       }
 
       // Empty area: start drawing a new rect.
-      select(cluster.id, null);
+      clearSelection();
       const id = newRectId();
       const initial: CropRect = { id, x, y, w: 0, h: 0 };
       addRect(cluster.id, initial);
@@ -190,9 +260,20 @@ export default function ClusterPanel({ cluster, preview, previewUrl }: Props) {
         startX: x,
         startY: y,
         orig: { x, y, w: 0, h: 0 },
+        origins: {},
       };
     },
-    [addRect, cluster.id, rects, select, selectedClusterId, selectedRectId, toImageCoords],
+    [
+      addRect,
+      clearSelection,
+      cluster.id,
+      rects,
+      selectOnly,
+      selectedRectIds,
+      setActiveCluster,
+      toImageCoords,
+      toggleSelect,
+    ],
   );
 
   const onPointerMove = useCallback(
@@ -204,7 +285,7 @@ export default function ClusterPanel({ cluster, preview, previewUrl }: Props) {
         let hover: Handle | null = null;
         for (let i = rects.length - 1; i >= 0; i--) {
           const r = rects[i]!;
-          const isSelected = selectedClusterId === cluster.id && selectedRectId === r.id;
+          const isSelected = selectedRectIds.has(r.id);
           const handle = hitTest(r, x, y, isSelected);
           if (handle) {
             hover = handle;
@@ -282,31 +363,26 @@ export default function ClusterPanel({ cluster, preview, previewUrl }: Props) {
         }
       }
       if (state.rectId) updateRect(cluster.id, state.rectId, patch);
-      if (
-        syncSizes &&
-        state.handle !== "draw" &&
-        state.handle !== "move" &&
-        state.rectId &&
-        ("w" in patch || "h" in patch)
-      ) {
-        const dimsByCluster: Record<string, { imgW: number; imgH: number }> = {};
-        for (const p of useWorkspaceStore.getState().previews) {
-          dimsByCluster[p.clusterId] = {
-            imgW: p.preview.width,
-            imgH: p.preview.height,
-          };
+
+      // Broadcast the same delta to every other selected rect across all
+      // clusters. Skip while drawing — a brand-new rect has no peers to mirror.
+      if (state.rectId && state.handle !== "draw") {
+        const dimsByCluster = buildDimsByCluster();
+        const delta = deltaForHandle(state.handle, dx, dy);
+        applyDeltaToSelectionExcept(state.rectId, delta, state.origins, dimsByCluster);
+        if (syncSizes && state.handle !== "move" && ("w" in patch || "h" in patch)) {
+          propagateSizeFromRect(cluster.id, state.rectId, dimsByCluster, anchorForHandle(state.handle));
         }
-        propagateSizeFromRect(cluster.id, state.rectId, dimsByCluster, anchorForHandle(state.handle));
       }
     },
     [
+      applyDeltaToSelectionExcept,
       cluster.id,
       imgH,
       imgW,
       propagateSizeFromRect,
       rects,
-      selectedClusterId,
-      selectedRectId,
+      selectedRectIds,
       syncSizes,
       toImageCoords,
       updateRect,
@@ -328,39 +404,35 @@ export default function ClusterPanel({ cluster, preview, previewUrl }: Props) {
     [cluster.id, removeRect],
   );
 
-  // Keyboard shortcuts: Delete the selected rect, Escape to deselect, and
-  // Ctrl/Cmd+C / Ctrl/Cmd+V to copy/paste crop-rect layouts in memory.
+  // Keyboard shortcuts: Delete/Esc operate over the whole global selection,
+  // and Ctrl/Cmd+C / Ctrl/Cmd+V copy/paste crop-rect layouts in memory. Every
+  // ClusterPanel registers this listener; the store actions are idempotent
+  // (removeSelectedRects clears the set, copy/paste are gated to the active
+  // cluster) so duplicate firings are no-ops.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const key = e.key.toLowerCase();
       const isCopyPaste = (key === "c" || key === "v") && (e.ctrlKey || e.metaKey);
       if (e.key !== "Delete" && e.key !== "Backspace" && e.key !== "Escape" && !isCopyPaste) return;
-
+      // Copy/paste only act in the active cluster so they fire once.
+      if (isCopyPaste && useCropStore.getState().activeClusterId !== cluster.id) return;
       if (e.key === "Escape") {
-        select(null, null);
+        clearSelection();
         return;
       }
-
+      e.preventDefault();
       if (isCopyPaste) {
-        // Swallow the keypress on every panel so the browser's real (OS)
-        // clipboard is never touched. Only the active cluster acts.
-        e.preventDefault();
-        const sel = useCropStore.getState();
-        if (sel.selectedClusterId !== cluster.id) return;
         if (key === "c") copy();
-        else paste();
+        else paste(cluster.id);
         return;
       }
-
-      const sel = useCropStore.getState();
-      if (sel.selectedClusterId === cluster.id && sel.selectedRectId) {
-        e.preventDefault();
-        removeRect(cluster.id, sel.selectedRectId);
+      if (useCropStore.getState().selectedRectIds.size > 0) {
+        removeSelectedRects();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [cluster.id, copy, paste, removeRect, select]);
+  }, [clearSelection, cluster.id, copy, paste, removeSelectedRects]);
 
   const cursor = cursorFor(hoverHandle);
 
@@ -388,7 +460,7 @@ export default function ClusterPanel({ cluster, preview, previewUrl }: Props) {
       >
         <image href={previewUrl} x={0} y={0} width={imgW} height={imgH} />
         {rects.map((r, idx) => {
-          const selected = selectedClusterId === cluster.id && selectedRectId === r.id;
+          const selected = selectedRectIds.has(r.id);
           const tooSmall = !hasEnoughSpaceForHandles(r);
           const fill = tooSmall ? "rgba(220, 50, 50, 0.25)" : "rgba(60, 130, 220, 0.25)";
           const stroke = selected ? "#000" : "rgba(60,130,220,0.9)";

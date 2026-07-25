@@ -97,10 +97,19 @@ export default function CroppingView() {
     setSyncSizes(v);
     if (!v) return;
     const state = useCropStore.getState();
-    let sourceClusterId: string | null = state.selectedClusterId;
-    let sourceRectId: string | null = state.selectedRectId;
-    const hasValidSelection =
-      sourceClusterId && sourceRectId && state.rectsByCluster[sourceClusterId]?.some((r) => r.id === sourceRectId);
+    // Sync from the first selected rect (any cluster); fall back to the first
+    // rect overall if nothing is selected.
+    let sourceClusterId: string | null = null;
+    let sourceRectId: string | null = null;
+    for (const [cid, list] of Object.entries(state.rectsByCluster)) {
+      const hit = list.find((r) => state.selectedRectIds.has(r.id));
+      if (hit) {
+        sourceClusterId = cid;
+        sourceRectId = hit.id;
+        break;
+      }
+    }
+    const hasValidSelection = sourceClusterId && sourceRectId;
     if (!hasValidSelection) {
       for (const [cid, list] of Object.entries(state.rectsByCluster)) {
         if (list.length) {

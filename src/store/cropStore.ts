@@ -23,22 +23,57 @@ export interface SizeAnchor {
   fixedTop: boolean;
 }
 
+/**
+ * A relative geometry change applied uniformly to every selected rect,
+ * regardless of cluster. Mirrors Briss's `moveSelectedRects` /
+ * `resizeSelRects` / `resizeAndMoveSelectedRects` broadcast model: the same
+ * delta reaches all selected rects.
+ */
+export interface RectDelta {
+  dx: number;
+  dy: number;
+  dw: number;
+  dh: number;
+}
+
 interface CropState {
   rectsByCluster: ClusterCrops;
-  selectedClusterId: string | null;
-  selectedRectId: string | null;
+  /** Global multi-select across all cluster panels. */
+  selectedRectIds: Set<string>;
+  /** The cluster the user last interacted with (paste target). */
+  activeClusterId: string | null;
   syncSizes: boolean;
   /** In-memory clipboard for copying crop-rect layouts between clusters. */
-  clipboard: CropRect[];
+  clipboard: PixelRect[];
   setRects: (clusterId: string, rects: CropRect[]) => void;
   addRect: (clusterId: string, rect: CropRect) => void;
   updateRect: (clusterId: string, rectId: string, patch: Partial<CropRect>) => void;
   removeRect: (clusterId: string, rectId: string) => void;
-  select: (clusterId: string | null, rectId: string | null) => void;
-  /** Replaces the clipboard with the currently selected rects (clears first). */
+  /** Shift+click: toggle a single rect's membership in the selection. */
+  toggleSelect: (rectId: string) => void;
+  /** Plain click: replace the selection with a single rect. */
+  selectOnly: (rectId: string) => void;
+  /** Deselect everything (Esc / empty-area click). */
+  clearSelection: () => void;
+  /** Delete every selected rect across all clusters. */
+  removeSelectedRects: () => void;
+  /**
+   * Apply a delta to every selected rect other than `exceptRectId` (the one
+   * being dragged, which the panel updates directly). Each rect is moved from
+   * its captured `origins` position and clamped to its cluster's image bounds.
+   */
+  applyDeltaToSelectionExcept: (
+    exceptRectId: string,
+    delta: RectDelta,
+    origins: Record<string, PixelRect>,
+    dimsByCluster: Record<string, ClusterDims>,
+  ) => void;
+  /** Mark a cluster as the paste target (set on pointer-down). */
+  setActiveCluster: (clusterId: string) => void;
+  /** Replace the clipboard with the currently selected rects (clears first). */
   copy: () => void;
-  /** Appends copies of the clipboard rects to the active cluster, unselected. */
-  paste: () => void;
+  /** Append copies of the clipboard rects to `clusterId`, starting unselected. */
+  paste: (clusterId: string) => void;
   clearAll: () => void;
   setSyncSizes: (v: boolean) => void;
   propagateSizeFromRect: (
@@ -54,10 +89,19 @@ export function newRectId(): string {
   return `rect-${nextId++}`;
 }
 
+/** Clamp a rect moved by `delta` from `orig` into a `imgW` x `imgH` box. */
+function moveRectByDelta(rect: CropRect, orig: PixelRect, delta: RectDelta, imgW: number, imgH: number): CropRect {
+  const w = clamp(orig.w + delta.dw, 1, imgW);
+  const h = clamp(orig.h + delta.dh, 1, imgH);
+  const x = clamp(orig.x + delta.dx, 0, Math.max(0, imgW - w));
+  const y = clamp(orig.y + delta.dy, 0, Math.max(0, imgH - h));
+  return { ...rect, x, y, w, h };
+}
+
 export const useCropStore = create<CropState>((set) => ({
   rectsByCluster: {},
-  selectedClusterId: null,
-  selectedRectId: null,
+  selectedRectIds: new Set(),
+  activeClusterId: null,
   syncSizes: false,
   clipboard: [],
   setRects: (clusterId, rects) =>
@@ -84,32 +128,74 @@ export const useCropStore = create<CropState>((set) => ({
   removeRect: (clusterId, rectId) =>
     set((s) => {
       const list = s.rectsByCluster[clusterId] ?? [];
+      if (!s.selectedRectIds.has(rectId) && !list.some((r) => r.id === rectId)) return {};
+      const selectedRectIds = new Set(s.selectedRectIds);
+      selectedRectIds.delete(rectId);
       return {
         rectsByCluster: {
           ...s.rectsByCluster,
           [clusterId]: list.filter((r) => r.id !== rectId),
         },
-        selectedRectId: s.selectedRectId === rectId ? null : s.selectedRectId,
-        selectedClusterId:
-          s.selectedClusterId === clusterId && s.selectedRectId === rectId ? null : s.selectedClusterId,
+        selectedRectIds,
       };
     }),
-  select: (clusterId, rectId) => set({ selectedClusterId: clusterId, selectedRectId: rectId }),
+  toggleSelect: (rectId) =>
+    set((s) => {
+      const selectedRectIds = new Set(s.selectedRectIds);
+      if (selectedRectIds.has(rectId)) selectedRectIds.delete(rectId);
+      else selectedRectIds.add(rectId);
+      return { selectedRectIds };
+    }),
+  selectOnly: (rectId) => set({ selectedRectIds: new Set([rectId]) }),
+  clearSelection: () => set({ selectedRectIds: new Set() }),
+  removeSelectedRects: () =>
+    set((s) => {
+      if (s.selectedRectIds.size === 0) return {};
+      const rectsByCluster: ClusterCrops = {};
+      for (const [cid, list] of Object.entries(s.rectsByCluster)) {
+        rectsByCluster[cid] = list.filter((r) => !s.selectedRectIds.has(r.id));
+      }
+      return { rectsByCluster, selectedRectIds: new Set() };
+    }),
+  applyDeltaToSelectionExcept: (exceptRectId, delta, origins, dimsByCluster) =>
+    set((s) => {
+      let hasOther = false;
+      for (const id of s.selectedRectIds) {
+        if (id !== exceptRectId) {
+          hasOther = true;
+          break;
+        }
+      }
+      if (!hasOther) return {};
+      const rectsByCluster: ClusterCrops = {};
+      for (const [cid, list] of Object.entries(s.rectsByCluster)) {
+        const dims = dimsByCluster[cid];
+        const imgW = dims?.imgW ?? Number.POSITIVE_INFINITY;
+        const imgH = dims?.imgH ?? Number.POSITIVE_INFINITY;
+        rectsByCluster[cid] = list.map((r) => {
+          if (r.id === exceptRectId || !s.selectedRectIds.has(r.id)) return r;
+          const orig = origins[r.id] ?? r;
+          return moveRectByDelta(r, orig, delta, imgW, imgH);
+        });
+      }
+      return { rectsByCluster };
+    }),
+  setActiveCluster: (clusterId) => set({ activeClusterId: clusterId }),
   copy: () =>
     set((s) => {
-      const clusterId = s.selectedClusterId;
-      if (!clusterId) return { clipboard: [] };
-      const list = s.rectsByCluster[clusterId] ?? [];
       // Mirrors Briss's copyToClipBoard: clear first, then snapshot the
-      // currently selected rects (their geometry, not their ids).
-      return {
-        clipboard: list.filter((r) => r.id === s.selectedRectId).map((r) => ({ ...r })),
-      };
+      // geometry of every selected rect (across all clusters).
+      const clip: PixelRect[] = [];
+      for (const list of Object.values(s.rectsByCluster)) {
+        for (const r of list) {
+          if (s.selectedRectIds.has(r.id)) clip.push({ x: r.x, y: r.y, w: r.w, h: r.h });
+        }
+      }
+      return { clipboard: clip };
     }),
-  paste: () =>
+  paste: (clusterId) =>
     set((s) => {
-      const clusterId = s.selectedClusterId;
-      if (!clusterId || s.clipboard.length === 0) return {};
+      if (s.clipboard.length === 0) return {};
       // Mirrors Briss's pasteFromClipBoard: append brand-new rects that copy
       // the geometry but start unselected (new id, selection left untouched).
       const pasted: CropRect[] = s.clipboard.map(({ x, y, w, h }) => ({
@@ -129,8 +215,8 @@ export const useCropStore = create<CropState>((set) => ({
   clearAll: () =>
     set({
       rectsByCluster: {},
-      selectedClusterId: null,
-      selectedRectId: null,
+      selectedRectIds: new Set(),
+      activeClusterId: null,
       syncSizes: false,
       clipboard: [],
     }),

@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { clamp, type PixelRect } from "@/lib/pdf/ratios";
+import { useWorkspaceStore } from "./workspaceStore";
 
 export interface CropRect extends PixelRect {
   id: string;
@@ -112,6 +113,17 @@ export function newRectId(): string {
   return `rect-${nextId++}`;
 }
 
+/**
+ * Drop the cached cropped PDF. Called from every cropStore mutator that would
+ * change the cropped output (any add / move / resize / delete / split /
+ * replace of a rect). Selection-only changes intentionally leave the cache
+ * intact, since the same rectangles produce the same cropped PDF regardless
+ * of which are selected.
+ */
+function invalidateCropCache(): void {
+  useWorkspaceStore.getState().clearCroppedCache();
+}
+
 /** Clamp a rect moved by `delta` from `orig` into a `imgW` x `imgH` box. */
 function moveRectByDelta(rect: CropRect, orig: PixelRect, delta: RectDelta, imgW: number, imgH: number): CropRect {
   const w = clamp(orig.w + delta.dw, 1, imgW);
@@ -127,19 +139,24 @@ export const useCropStore = create<CropState>((set) => ({
   activeClusterId: null,
   syncSizes: false,
   clipboard: [],
-  setRects: (clusterId, rects) =>
-    set((s) => ({
+  setRects: (clusterId, rects) => {
+    invalidateCropCache();
+    return set((s) => ({
       rectsByCluster: { ...s.rectsByCluster, [clusterId]: rects },
-    })),
-  addRect: (clusterId, rect) =>
-    set((s) => ({
+    }));
+  },
+  addRect: (clusterId, rect) => {
+    invalidateCropCache();
+    return set((s) => ({
       rectsByCluster: {
         ...s.rectsByCluster,
         [clusterId]: [...(s.rectsByCluster[clusterId] ?? []), rect],
       },
-    })),
-  updateRect: (clusterId, rectId, patch) =>
-    set((s) => {
+    }));
+  },
+  updateRect: (clusterId, rectId, patch) => {
+    invalidateCropCache();
+    return set((s) => {
       const list = s.rectsByCluster[clusterId] ?? [];
       return {
         rectsByCluster: {
@@ -147,9 +164,11 @@ export const useCropStore = create<CropState>((set) => ({
           [clusterId]: list.map((r) => (r.id === rectId ? { ...r, ...patch } : r)),
         },
       };
-    }),
-  removeRect: (clusterId, rectId) =>
-    set((s) => {
+    });
+  },
+  removeRect: (clusterId, rectId) => {
+    invalidateCropCache();
+    return set((s) => {
       const list = s.rectsByCluster[clusterId] ?? [];
       if (!s.selectedRectIds.has(rectId) && !list.some((r) => r.id === rectId)) return {};
       const selectedRectIds = new Set(s.selectedRectIds);
@@ -161,9 +180,11 @@ export const useCropStore = create<CropState>((set) => ({
         },
         selectedRectIds,
       };
-    }),
-  replaceRect: (clusterId, rectId, replacements) =>
-    set((s) => {
+    });
+  },
+  replaceRect: (clusterId, rectId, replacements) => {
+    invalidateCropCache();
+    return set((s) => {
       const list = s.rectsByCluster[clusterId] ?? [];
       const idx = list.findIndex((r) => r.id === rectId);
       if (idx === -1) return {};
@@ -177,8 +198,12 @@ export const useCropStore = create<CropState>((set) => ({
         },
         selectedRectIds,
       };
-    }),
-  replaceAllRects: (rectsByCluster) => set({ rectsByCluster, selectedRectIds: new Set() }),
+    });
+  },
+  replaceAllRects: (rectsByCluster) => {
+    invalidateCropCache();
+    return set({ rectsByCluster, selectedRectIds: new Set() });
+  },
   toggleSelect: (rectId) =>
     set((s) => {
       const selectedRectIds = new Set(s.selectedRectIds);
@@ -188,17 +213,20 @@ export const useCropStore = create<CropState>((set) => ({
     }),
   selectOnly: (rectId) => set({ selectedRectIds: new Set([rectId]) }),
   clearSelection: () => set({ selectedRectIds: new Set() }),
-  removeSelectedRects: () =>
-    set((s) => {
+  removeSelectedRects: () => {
+    invalidateCropCache();
+    return set((s) => {
       if (s.selectedRectIds.size === 0) return {};
       const rectsByCluster: ClusterCrops = {};
       for (const [cid, list] of Object.entries(s.rectsByCluster)) {
         rectsByCluster[cid] = list.filter((r) => !s.selectedRectIds.has(r.id));
       }
       return { rectsByCluster, selectedRectIds: new Set() };
-    }),
-  applyDeltaToSelectionExcept: (exceptRectId, delta, origins, dimsByCluster) =>
-    set((s) => {
+    });
+  },
+  applyDeltaToSelectionExcept: (exceptRectId, delta, origins, dimsByCluster) => {
+    invalidateCropCache();
+    return set((s) => {
       let hasOther = false;
       for (const id of s.selectedRectIds) {
         if (id !== exceptRectId) {
@@ -219,9 +247,11 @@ export const useCropStore = create<CropState>((set) => ({
         });
       }
       return { rectsByCluster };
-    }),
-  applyDeltaToSelection: (delta, dimsByCluster) =>
-    set((s) => {
+    });
+  },
+  applyDeltaToSelection: (delta, dimsByCluster) => {
+    invalidateCropCache();
+    return set((s) => {
       if (s.selectedRectIds.size === 0) return {};
       const rectsByCluster: ClusterCrops = {};
       for (const [cid, list] of Object.entries(s.rectsByCluster)) {
@@ -240,7 +270,8 @@ export const useCropStore = create<CropState>((set) => ({
         );
       }
       return { rectsByCluster };
-    }),
+    });
+  },
   setActiveCluster: (clusterId) => set({ activeClusterId: clusterId }),
   copy: () =>
     set((s) => {
@@ -254,8 +285,9 @@ export const useCropStore = create<CropState>((set) => ({
       }
       return { clipboard: clip };
     }),
-  paste: (clusterId) =>
-    set((s) => {
+  paste: (clusterId) => {
+    invalidateCropCache();
+    return set((s) => {
       if (s.clipboard.length === 0) return {};
       // Mirrors Briss's pasteFromClipBoard: append brand-new rects that copy
       // the geometry but start unselected (new id, selection left untouched).
@@ -272,18 +304,22 @@ export const useCropStore = create<CropState>((set) => ({
           [clusterId]: [...(s.rectsByCluster[clusterId] ?? []), ...pasted],
         },
       };
-    }),
-  clearAll: () =>
-    set({
+    });
+  },
+  clearAll: () => {
+    invalidateCropCache();
+    return set({
       rectsByCluster: {},
       selectedRectIds: new Set(),
       activeClusterId: null,
       syncSizes: false,
       clipboard: [],
-    }),
+    });
+  },
   setSyncSizes: (v) => set({ syncSizes: v }),
-  propagateSizeFromRect: (sourceClusterId, sourceRectId, dimsByCluster, anchor) =>
-    set((s) => {
+  propagateSizeFromRect: (sourceClusterId, sourceRectId, dimsByCluster, anchor) => {
+    invalidateCropCache();
+    return set((s) => {
       const sourceList = s.rectsByCluster[sourceClusterId] ?? [];
       const sourceRect = sourceList.find((r) => r.id === sourceRectId);
       const sourceDims = dimsByCluster[sourceClusterId];
@@ -318,9 +354,11 @@ export const useCropStore = create<CropState>((set) => ({
         });
       }
       return { rectsByCluster: newRectsByCluster };
-    }),
-  alignSelectedRects: (reference, dimsByCluster) =>
-    set((s) => {
+    });
+  },
+  alignSelectedRects: (reference, dimsByCluster) => {
+    invalidateCropCache();
+    return set((s) => {
       if (s.selectedRectIds.size === 0) return {};
       const { x: rx, y: ry, w: rw, h: rh } = reference;
       let changed = false;
@@ -341,5 +379,6 @@ export const useCropStore = create<CropState>((set) => ({
         rectsByCluster[cid] = list.map((r) => (s.selectedRectIds.has(r.id) ? { ...r, x, y, w, h } : r));
       }
       return changed ? { rectsByCluster } : {};
-    }),
+    });
+  },
 }));

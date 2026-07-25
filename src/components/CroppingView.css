@@ -143,6 +143,13 @@
   flex: 1;
 }
 
+.cropping-view__crop-label {
+  color: #ddd;
+  font-size: 13px;
+  font-weight: 500;
+  user-select: none;
+}
+
 .cropping-view__primary {
   background: #4a9eff;
   color: #fff;

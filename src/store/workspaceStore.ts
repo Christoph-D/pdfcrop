@@ -43,6 +43,12 @@ interface WorkspaceState {
   progressTotal: number;
   error: string | null;
   lastCrop: (CropOutput & { fileName: string }) | null;
+  /**
+   * Cached cropped bytes shared by the Preview and Download buttons. Reused
+   * until invalidated (new PDF, re-cluster, or any crop-rect change) so
+   * repeated clicks don't re-run `cropPdf`.
+   */
+  croppedCache: { bytes: Uint8Array; fileName: string } | null;
   /** Manual zoom factor. 1 = auto-fit; multiplied onto each panel's fit width. */
   zoom: number;
   lastImport: { matched: number; skipped: number } | null;
@@ -59,7 +65,12 @@ interface WorkspaceState {
   resetZoom: () => void;
   fitToWindow: () => void;
   reclusterWithExcludes: (excludes: ReadonlySet<number>) => void;
-  cropAndSave: () => Promise<void>;
+  /** Crop (or reuse the cached result) and open the PDF in a new tab. */
+  cropPreview: () => Promise<void>;
+  /** Crop (or reuse the cached result) and download it as `<name>_cropped.pdf`. */
+  cropDownload: () => Promise<void>;
+  /** Drop the cached cropped bytes (call from any change that invalidates it). */
+  clearCroppedCache: () => void;
   exportCropSettings: () => Promise<void>;
   importCropSettings: (file: File) => Promise<void>;
   dismissImportNotice: () => void;
@@ -79,6 +90,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   progressTotal: 0,
   error: null,
   lastCrop: null,
+  croppedCache: null,
   zoom: 1,
   lastImport: null,
   setSource: (source) => {
@@ -92,9 +104,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       isReclustering: false,
       error: null,
       // A new document resets zoom to its auto-fit baseline and clears any
-      // stale import notice.
+      // stale import notice, plus any cached crop from the previous file.
       zoom: 1,
       lastImport: null,
+      croppedCache: null,
     });
   },
   setClusters: (clusters) => set({ clusters }),
@@ -134,42 +147,48 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       status: "ready",
       isReclustering: true,
       error: null,
+      croppedCache: null,
     });
   },
-  cropAndSave: async () => {
+  cropPreview: async () => {
     const state = get();
     if (!state.source) return;
     set({ status: "cropping", error: null });
     try {
-      const cropStore = useCropStore.getState();
-      const output = await cropPdf({
-        source: state.source,
-        clusters: state.clusters,
-        rectsByCluster: cropStore.rectsByCluster,
-        previews: state.previews.map((p) => ({
-          clusterId: p.clusterId,
-          preview: p.preview,
-        })),
-      });
-      const fileName = croppedFileName(state.source.fileName);
+      const { bytes } = await ensureCroppedBytes();
       // Open the cropped PDF in a new tab only now that the bytes are ready,
       // so users don't see a blank tab while cropping runs. Because cropping
       // crossed an `await`, this is no longer within the click's user gesture
       // and a popup blocker may suppress the tab; surface a clear error then.
-      const tab = openBytesInTab(output.bytes, "application/pdf");
+      const tab = openBytesInTab(bytes, "application/pdf");
       if (!tab) {
         set({
           error: "Could not open the cropped PDF in a new tab. Allow pop-ups for this site, then try again.",
         });
       }
-      set({ status: "ready", lastCrop: { ...output, fileName } });
+      set({ status: "ready" });
     } catch (err) {
-      set({
-        status: "ready",
-        error: err instanceof Error ? err.message : String(err),
-      });
+      set({ status: "ready", error: err instanceof Error ? err.message : String(err) });
     }
   },
+  cropDownload: async () => {
+    const state = get();
+    if (!state.source) return;
+    set({ status: "cropping", error: null });
+    try {
+      const { bytes, fileName } = await ensureCroppedBytes();
+      await saveFile(bytes, {
+        suggestedName: fileName,
+        mimeType: "application/pdf",
+        extension: ".pdf",
+        description: "Cropped PDF",
+      });
+      set({ status: "ready" });
+    } catch (err) {
+      set({ status: "ready", error: err instanceof Error ? err.message : String(err) });
+    }
+  },
+  clearCroppedCache: () => set({ croppedCache: null }),
   exportCropSettings: async () => {
     const state = get();
     if (!state.source) return;
@@ -234,5 +253,30 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       lastCrop: null,
       zoom: 1,
       lastImport: null,
+      croppedCache: null,
     }),
 }));
+
+/**
+ * Return the cropped PDF bytes, computing them once and caching the result so
+ * repeated Preview/Download clicks don't re-run `cropPdf`. Both buttons share
+ * this single cache; it is cleared whenever the source, clusters, or any crop
+ * rectangle changes (see `clearCroppedCache` callers).
+ */
+async function ensureCroppedBytes(): Promise<{ bytes: Uint8Array; fileName: string }> {
+  const { source, clusters, previews, croppedCache } = useWorkspaceStore.getState();
+  if (croppedCache) return croppedCache;
+  const cropStore = useCropStore.getState();
+  const output = await cropPdf({
+    source: source!,
+    clusters,
+    rectsByCluster: cropStore.rectsByCluster,
+    previews: previews.map((p) => ({ clusterId: p.clusterId, preview: p.preview })),
+  });
+  const fileName = croppedFileName(source!.fileName);
+  useWorkspaceStore.setState({
+    croppedCache: { bytes: output.bytes, fileName },
+    lastCrop: { ...output, fileName },
+  });
+  return { bytes: output.bytes, fileName };
+}

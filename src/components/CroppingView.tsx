@@ -15,7 +15,8 @@ export default function CroppingView() {
   const isReclustering = useWorkspaceStore((s) => s.isReclustering);
   const error = useWorkspaceStore((s) => s.error);
   const lastCrop = useWorkspaceStore((s) => s.lastCrop);
-  const cropAndSave = useWorkspaceStore((s) => s.cropAndSave);
+  const cropPreview = useWorkspaceStore((s) => s.cropPreview);
+  const cropDownload = useWorkspaceStore((s) => s.cropDownload);
   const zoom = useWorkspaceStore((s) => s.zoom);
   const zoomIn = useWorkspaceStore((s) => s.zoomIn);
   const zoomOut = useWorkspaceStore((s) => s.zoomOut);
@@ -337,8 +338,12 @@ export default function CroppingView() {
         >
           Load new PDF
         </button>
-        <button type="button" className="cropping-view__primary" disabled={busy} onClick={() => void cropAndSave()}>
-          {status === "cropping" ? "Cropping…" : "Crop PDF"}
+        <span className="cropping-view__crop-label">Crop:</span>
+        <button type="button" className="cropping-view__primary" disabled={busy} onClick={() => void cropPreview()}>
+          Preview
+        </button>
+        <button type="button" className="cropping-view__primary" disabled={busy} onClick={() => void cropDownload()}>
+          Download
         </button>
       </header>
 

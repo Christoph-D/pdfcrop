@@ -24,7 +24,10 @@ test.describe("PDF crop happy path", () => {
     // rasterizes previews, so allow a generous wait for this gate assertion.
     await expect(page.locator(".cropping-view__title")).toHaveText("sample.pdf", { timeout: 30_000 });
     await expect(page.locator(".cropping-view__count")).toContainText("4 pages");
-    await expect(page.getByRole("button", { name: "Crop PDF" })).toBeVisible();
+    // The single "Crop PDF" button is now a "Crop:" label plus two actions.
+    await expect(page.locator(".cropping-view__crop-label")).toHaveText("Crop:");
+    await expect(page.getByRole("button", { name: "Preview" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Download" })).toBeVisible();
 
     // At least one merged cluster preview rendered.
     await expect(page.locator(".cluster-panel__svg").first()).toBeVisible();
@@ -45,7 +48,7 @@ test.describe("PDF crop happy path", () => {
 
     const [popup] = await Promise.all([
       page.waitForEvent("popup"),
-      page.getByRole("button", { name: "Crop PDF" }).click(),
+      page.getByRole("button", { name: "Preview" }).click(),
     ]);
 
     // A new tab opened.
@@ -122,5 +125,23 @@ test.describe("PDF crop happy path", () => {
     // 2 (odd) + 2 (excluded singleton, inherited) + 1 (even) = 5. If transfer
     // had failed, each new panel would auto-seed exactly one -> 3.
     await expect(page.locator(".cluster-panel__crop-rect")).toHaveCount(5);
+  });
+
+  test("downloads a cropped PDF via the Download button", async ({ page }) => {
+    test.setTimeout(60_000);
+    // The File System Access save picker can't be driven by automation, so
+    // force the <a download> fallback that emits a real download event.
+    await page.addInitScript(() => {
+      (window as unknown as { showSaveFilePicker?: unknown }).showSaveFilePicker = undefined;
+    });
+    await page.goto("/");
+    await page.locator('input[type="file"]').first().setInputFiles(SAMPLE_PDF);
+    await expect(page.locator(".cropping-view__title")).toHaveText("sample.pdf", { timeout: 30_000 });
+
+    const [download] = await Promise.all([
+      page.waitForEvent("download"),
+      page.getByRole("button", { name: "Download" }).click(),
+    ]);
+    expect(download.suggestedFilename()).toBe("sample_cropped.pdf");
   });
 });

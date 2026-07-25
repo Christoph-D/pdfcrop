@@ -67,14 +67,14 @@ pollute the merged preview.
 - Original: `BrissSwingGUI.getExcludedPages` → `PageNumberParser` (syntax: `1-4;6;9`) → `PageExcludes` consumed by
   `ClusterCreator.clusterPages`.
 - To port:
-  - Add an optional exclude dialog after load (or as a "Re-cluster with excludes" action in the cropping view).
+  - Add an optional "Re-cluster with excludes" action in the cropping view.
   - Extend `clusterPages(pages, excludes?)` so excluded pages get a unique cluster id each.
   - Preserve existing user-drawn rects on re-cluster (port of `BrissSwingGUI.copyCropsToClusters` — match by
     `(parity, roundedW, roundedH)` and copy ratios over).
 
 ## Zoom
 
-Manual zoom in/out/reset/fit, plus Ctrl+wheel.
+Manual zoom in/out/reset/fit, plus mouse wheel scrolling/mouse panning.
 
 - Original: `BrissSwingGUI.zoomBy`, `setZoom`, `fitToWindow`; constants `MIN_ZOOM=0.1`, `MAX_ZOOM=10.0`,
   `ZOOM_STEP=1.25`, `FIT_PADDING=0.95`.
@@ -82,19 +82,7 @@ Manual zoom in/out/reset/fit, plus Ctrl+wheel.
   as a CSS variable driving `max-width` on `.cluster-panel`).
 - Auto-fit on load and on container resize is already effectively done by the current flex/grid; manual zoom is the
   missing piece.
-
-## Separate Preview button
-
-The desktop app has both a "Preview" button (crops to a temp file and opens it) and a "Crop PDF" button (save dialog).
-
-- Original: `BrissSwingGUI.showPreview` vs `savePDF`.
-- Browser equivalent: a Preview button that runs the same `cropPdf` pipeline, produces a `Blob`, and opens it in a new
-  browser tab via `URL.createObjectURL` + `window.open` — no download.
-
-## Help dialog / donate link
-
-- Original: `HelpDialog` (loads `/help.html`), Donate menu item opens a URL.
-- Browser equivalent: a small in-app modal with usage instructions; "Donate" link via `<a target="_blank">`. Trivial.
+- Standard mouse wheel scrolling/left click panning like in a map.
 
 ## Persisted crop settings (export / import)
 
@@ -123,15 +111,9 @@ Current policy: if any cluster has >1 rect, the entire outline tree is dropped w
 
 - Move `calculateOverlay` and per-page rasterization behind a worker pool (more than the single current worker) for
   large PDFs.
-- WebGL/WebGPU fragment shader for the mean/sd/min projection (currently pure typed-array math in `overlay.ts`). For ≤15
-  pages per cluster at ≤900px tall the JS implementation is fine; upgrade only if real-world perf is poor.
-- Lazy-render only visible cluster panels (IntersectionObserver) instead of rendering every cluster up front.
 
 ## Better-fidelity porting details
 
 - `DrawableCropRect` draws a size label on selected rects showing `WxH mm  1:ratio`. Not ported — would be a small SVG
   `<text>` per selected rect using the `INCH_IN_USER_UNIT = 72` and `INCH_IN_MILLIMETERS = 25.4` conversion from
   `DrawableCropRect.draw`.
-- The Java `MergedPanel` cursor logic uses an 8px `CORNER_DIMENSION` for rendering handles and a 20px
-  `SELECTABLE_CORNER_DIMENSION` for hit testing. Both constants are imported into `ratios.ts` but only the rendering
-  dimension is currently exposed in `ClusterPanel` tooltips/labels.

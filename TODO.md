@@ -119,6 +119,6 @@ Current policy: if any cluster has >1 rect, the entire outline tree is dropped w
 
 ## Better-fidelity porting details
 
-- `DrawableCropRect` draws a size label on selected rects showing `WxH mm  1:ratio`. Not ported — would be a small SVG
-  `<text>` per selected rect using the `INCH_IN_USER_UNIT = 72` and `INCH_IN_MILLIMETERS = 25.4` conversion from
-  `DrawableCropRect.draw`.
+- `DrawableCropRect` draws a size label on selected rects showing `WxH mm  1:ratio`. **Ported** — `ClusterPanel` renders
+  an SVG `<text>` via `formatCropSizeLabel` (`src/lib/pdf/units.ts`) using the `INCH_IN_USER_UNIT = 72` and
+  `INCH_IN_MILLIMETERS = 25.4` conversion from `DrawableCropRect.draw`.

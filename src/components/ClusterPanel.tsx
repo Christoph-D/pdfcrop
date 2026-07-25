@@ -11,6 +11,7 @@ import {
   type PixelRect,
   ratiosToPixelRect,
 } from "@/lib/pdf/ratios";
+import { formatCropSizeLabel } from "@/lib/pdf/units";
 import { FIT_PADDING, useWorkspaceStore } from "@/store/workspaceStore";
 import { newRectId, useCropStore, type CropRect, type RectDelta, type SizeAnchor } from "@/store/cropStore";
 import "./ClusterPanel.css";
@@ -532,6 +533,21 @@ export default function ClusterPanel({ cluster, preview, previewUrl }: Props) {
               >
                 {idx + 1}
               </text>
+              {/* Size label on selected rects. Port of DrawableCropRect.drawSelectionOverlay. */}
+              {selected && (
+                <text
+                  x={r.x + 4}
+                  y={r.y + r.h - 4}
+                  fill="#ffd400"
+                  stroke="#000"
+                  strokeWidth={0.5}
+                  paintOrder="stroke"
+                  fontSize={Math.min(12, Math.max(8, r.h / 10))}
+                  fontFamily="sans-serif"
+                >
+                  {formatCropSizeLabel(r)}
+                </text>
+              )}
               {selected &&
                 (
                   [

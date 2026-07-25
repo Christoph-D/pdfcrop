@@ -128,9 +128,15 @@ export async function cropPdf(input: CropInput): Promise<CropOutput> {
   // page reference to the first output copy of the original page. Returns
   // false (after dropping the tree) if it could not be copied safely.
   const outlinesIntact = copyOutlines(srcDoc, outDoc, firstCopyRefBySrcPage);
+  // Carry the source's named destinations too: many PDFs (Word, LaTeX, …)
+  // specify outline destinations *by name*, resolved via the catalog's
+  // `/Names /Dests` name tree. `copyPages` does not carry that tree over, so
+  // without this every named-destination bookmark would point at a name that
+  // no longer exists in the output and clicking it would jump nowhere.
+  const namedDestsIntact = copyNamedDestinations(srcDoc, outDoc, firstCopyRefBySrcPage);
 
   const bytes = await outDoc.save({ useObjectStreams: true });
-  return { bytes, outlinePreserved: outlinesIntact, outputPageCount: outputIndex };
+  return { bytes, outlinePreserved: outlinesIntact && namedDestsIntact, outputPageCount: outputIndex };
 }
 
 /**
@@ -173,7 +179,7 @@ function copyOutlines(srcDoc: PDFDocument, outDoc: PDFDocument, firstCopyRefBySr
   if (!outlinesValue) return true; // nothing to preserve
 
   try {
-    const cloned = cloneOutlineObject(
+    const cloned = cloneWithPageMap(
       outlinesValue,
       srcDoc.context,
       outDoc.context,
@@ -191,13 +197,60 @@ function copyOutlines(srcDoc: PDFDocument, outDoc: PDFDocument, firstCopyRefBySr
 }
 
 /**
- * Deep-copy a single object of the outline tree from the source context into
- * the destination context, rewriting page references via `pageMap` (source
- * object number -> first-copy output ref). `visited` breaks the cycles the
- * outline tree contains (every item links back to its `/Parent`, and `/First`
- * links down to children).
+ * Copy the source document's named-destination tree (`catalog /Names /Dests`)
+ * into the output, rewriting every destination page reference to the FIRST
+ * output copy of the original page. Outline items that specify destinations
+ * *by name* (common in PDFs exported from Word, LaTeX, etc.) reference a name
+ * that `PDFDocument.copyPages` does not carry over; without this the name
+ * dangles in the output and clicking the bookmark jumps nowhere.
+ *
+ * The destination arrays inside the name tree have the same `[pageRef …]`
+ * shape as explicit outline destinations, so the same ref-rewriting walk used
+ * for outlines (`cloneWithPageMap`) handles them. Returns `true` when there
+ * was nothing to copy or the copy succeeded, `false` if it failed.
  */
-function cloneOutlineObject(
+function copyNamedDestinations(
+  srcDoc: PDFDocument,
+  outDoc: PDFDocument,
+  firstCopyRefBySrcPage: Map<number, PDFRef>,
+): boolean {
+  const srcNames = srcDoc.catalog.lookupMaybe(PDFName.of("Names"), PDFDict);
+  if (!srcNames) return true; // no Names tree -> nothing to carry
+  const srcDests = srcNames.get(PDFName.of("Dests"));
+  if (!srcDests) return true; // no named destinations
+
+  try {
+    const cloned = cloneWithPageMap(
+      srcDests,
+      srcDoc.context,
+      outDoc.context,
+      firstCopyRefBySrcPage,
+      new Map<number, PDFRef>(),
+    );
+    let outNames = outDoc.catalog.lookupMaybe(PDFName.of("Names"), PDFDict);
+    if (!outNames) {
+      outNames = PDFDict.withContext(outDoc.context);
+      outDoc.catalog.set(PDFName.of("Names"), outNames);
+    }
+    outNames.set(PDFName.of("Dests"), cloned);
+    return true;
+  } catch {
+    // Could not safely rewrite named destinations. Leave them uncopied; named-
+    // destination bookmarks won't resolve, but the PDF stays valid.
+    return false;
+  }
+}
+
+/**
+ * Deep-copy an object graph from the source context into the destination
+ * context, rewriting page references via `pageMap` (source object number ->
+ * first-copy output ref). Used for both the outline (bookmark) tree and the
+ * named-destination (`/Names /Dests`) name tree, which share the same
+ * `[pageRef …]` destination shape. `visited` breaks the cycles the outline
+ * tree contains (every item links back to its `/Parent`, and `/First` links
+ * down to children) and deduplicates shared indirect objects.
+ */
+function cloneWithPageMap(
   value: PDFObject,
   srcCtx: PDFContext,
   dstCtx: PDFContext,
@@ -208,35 +261,35 @@ function cloneOutlineObject(
     // A destination page reference -> retarget to the first output copy.
     const mapped = pageMap.get(value.objectNumber);
     if (mapped) return mapped;
-    return cloneOutlineIndirect(value, srcCtx, dstCtx, pageMap, visited);
+    return cloneIndirect(value, srcCtx, dstCtx, pageMap, visited);
   }
   if (value instanceof PDFDict) {
     const clone = PDFDict.withContext(dstCtx);
     for (const [key, entry] of value.entries()) {
-      clone.set(key, cloneOutlineObject(entry, srcCtx, dstCtx, pageMap, visited));
+      clone.set(key, cloneWithPageMap(entry, srcCtx, dstCtx, pageMap, visited));
     }
     return clone;
   }
   if (value instanceof PDFArray) {
     const clone = PDFArray.withContext(dstCtx);
     for (let i = 0; i < value.size(); i++) {
-      clone.push(cloneOutlineObject(value.get(i), srcCtx, dstCtx, pageMap, visited));
+      clone.push(cloneWithPageMap(value.get(i), srcCtx, dstCtx, pageMap, visited));
     }
     return clone;
   }
   if (value instanceof PDFStream) {
-    // Outline trees don't contain streams, but copy them faithfully anyway.
+    // Outline/name trees don't contain streams, but copy them faithfully.
     const clone = value.clone(dstCtx);
     for (const [key, entry] of value.dict.entries()) {
-      clone.dict.set(key, cloneOutlineObject(entry, srcCtx, dstCtx, pageMap, visited));
+      clone.dict.set(key, cloneWithPageMap(entry, srcCtx, dstCtx, pageMap, visited));
     }
     return clone;
   }
   return value.clone();
 }
 
-/** Copy one indirect outline object (allocated a fresh ref) into `dstCtx`. */
-function cloneOutlineIndirect(
+/** Copy one indirect object (allocated a fresh ref) into `dstCtx`. */
+function cloneIndirect(
   ref: PDFRef,
   srcCtx: PDFContext,
   dstCtx: PDFContext,
@@ -249,7 +302,7 @@ function cloneOutlineIndirect(
   visited.set(ref.objectNumber, newRef);
   const srcObj = srcCtx.lookup(ref);
   if (srcObj) {
-    dstCtx.assign(newRef, cloneOutlineObject(srcObj, srcCtx, dstCtx, pageMap, visited));
+    dstCtx.assign(newRef, cloneWithPageMap(srcObj, srcCtx, dstCtx, pageMap, visited));
   }
   return newRef;
 }

@@ -63,6 +63,65 @@ async function buildSourceWithOutlines(): Promise<Uint8Array> {
   return doc.save();
 }
 
+/**
+ * Build a small source PDF whose bookmarks reference pages *by name*, and
+ * whose catalog carries a `/Names /Dests` name tree resolving those names to
+ * explicit `[pageRef /Fit]` destinations. This mirrors PDFs exported from
+ * Word, LaTeX, and similar tools, where clicking an outline item requires
+ * resolving the name through the catalog's Names tree.
+ */
+async function buildSourceWithNamedDestinations(): Promise<Uint8Array> {
+  const doc = await PDFDocument.create();
+  const pages: PDFPage[] = [];
+  for (let i = 0; i < 3; i++) pages.push(doc.addPage([W, H]));
+  const ctx = doc.context;
+
+  const entries = [
+    { title: "Page 1", name: "page1", pageRef: pages[0]!.ref },
+    { title: "Page 2", name: "page2", pageRef: pages[1]!.ref },
+    { title: "Page 3", name: "page3", pageRef: pages[2]!.ref },
+  ];
+
+  // Named-destination name tree: a flat leaf node with a /Names array of
+  // alternating [text-string name, destination array] pairs.
+  const destsNames = PDFArray.withContext(ctx);
+  for (const { name, pageRef } of entries) {
+    destsNames.push(PDFHexString.fromText(name));
+    destsNames.push(ctx.obj([pageRef, "Fit"]));
+  }
+  const dests = PDFDict.withContext(ctx);
+  dests.set(PDFName.of("Names"), destsNames);
+  const limits = PDFArray.withContext(ctx);
+  limits.push(PDFHexString.fromText("page1"));
+  limits.push(PDFHexString.fromText("page3"));
+  dests.set(PDFName.of("Limits"), limits);
+  const names = PDFDict.withContext(ctx);
+  names.set(PDFName.of("Dests"), dests);
+  doc.catalog.set(PDFName.of("Names"), names);
+
+  // Outline items reference destinations by NAME (PDFName), as Word/LaTeX do.
+  const items = entries.map(({ title, name }) => {
+    const item = PDFDict.withContext(ctx);
+    item.set(PDFName.of("Title"), PDFString.of(title));
+    item.set(PDFName.of("Dest"), PDFName.of(name));
+    return { dict: item, ref: ctx.register(item) };
+  });
+  const root = PDFDict.withContext(ctx);
+  root.set(PDFName.of("Type"), PDFName.of("Outlines"));
+  root.set(PDFName.of("Count"), PDFNumber.of(items.length));
+  const rootRef = ctx.register(root);
+  items.forEach((it, i) => {
+    it.dict.set(PDFName.of("Parent"), rootRef);
+    if (i > 0) it.dict.set(PDFName.of("Prev"), items[i - 1]!.ref);
+    if (i < items.length - 1) it.dict.set(PDFName.of("Next"), items[i + 1]!.ref);
+  });
+  root.set(PDFName.of("First"), items[0]!.ref);
+  root.set(PDFName.of("Last"), items[items.length - 1]!.ref);
+  doc.catalog.set(PDFName.of("Outlines"), rootRef);
+
+  return doc.save();
+}
+
 interface ReadBookmark {
   title: string;
   /** Object number of the destination page reference, or null if none. */
@@ -114,6 +173,58 @@ function firstOutputIndexOf(doc: PDFDocument, objNum: number): number {
     if (pages[i]!.ref.objectNumber === objNum) return i + 1;
   }
   throw new Error(`no output page with object number ${objNum}`);
+}
+
+/** Walk a document's outline tree and return its name-based bookmarks. */
+function readNamedOutlines(doc: PDFDocument): { title: string; destName: string | null }[] {
+  const root = doc.catalog.lookupMaybe(PDFName.of("Outlines"), PDFDict);
+  if (!root) return [];
+  const out: { title: string; destName: string | null }[] = [];
+  let cur = asRef(root.get(PDFName.of("First")));
+  while (cur) {
+    const item = doc.context.lookup(cur, PDFDict);
+    const titleVal = item.get(PDFName.of("Title"));
+    const title = titleVal instanceof PDFString || titleVal instanceof PDFHexString ? titleVal.decodeText() : "";
+    const dest = item.get(PDFName.of("Dest"));
+    const destName =
+      dest instanceof PDFName || dest instanceof PDFString || dest instanceof PDFHexString ? dest.decodeText() : null;
+    out.push({ title, destName });
+    cur = asRef(item.get(PDFName.of("Next")));
+  }
+  return out;
+}
+
+/**
+ * Resolve a named destination `name` through the catalog's `/Names /Dests`
+ * name tree, returning the page ref of its `[pageRef …]` destination array.
+ * Recurses into `/Kids` and scans leaf `/Names` (alternating key/value) pairs,
+ * mirroring how a PDF reader resolves a named-destination bookmark.
+ */
+function resolveNamedDest(doc: PDFDocument, name: string): PDFRef | undefined {
+  const names = doc.catalog.lookupMaybe(PDFName.of("Names"), PDFDict);
+  const destsRoot = names?.lookupMaybe(PDFName.of("Dests"), PDFDict);
+  if (!destsRoot) return undefined;
+  return searchNameTreeForPage(doc, destsRoot, name);
+}
+
+function searchNameTreeForPage(doc: PDFDocument, node: PDFDict, name: string): PDFRef | undefined {
+  const kids = node.lookupMaybe(PDFName.of("Kids"), PDFArray);
+  if (kids) {
+    for (let i = 0; i < kids.size(); i++) {
+      const kid = doc.context.lookup(kids.get(i), PDFDict);
+      const found = searchNameTreeForPage(doc, kid, name);
+      if (found) return found;
+    }
+    return undefined;
+  }
+  const entries = node.lookupMaybe(PDFName.of("Names"), PDFArray);
+  if (!entries) return undefined;
+  for (let i = 0; i + 1 < entries.size(); i += 2) {
+    const key = entries.get(i);
+    const keyText = key instanceof PDFString || key instanceof PDFHexString ? key.decodeText() : "";
+    if (keyText === name) return destPageRef(doc, entries.get(i + 1));
+  }
+  return undefined;
 }
 
 function rect(x: number, y: number, w: number, h: number, id: string): CropRect {
@@ -207,5 +318,35 @@ describe("cropPdf outline preservation", () => {
     });
 
     expect(out.outlinePreserved).toBe(true);
+  });
+
+  it("carries named destinations so name-based bookmarks jump to the first copy", async () => {
+    const source = await buildSourceWithNamedDestinations();
+    const clusters = clusterPages([pageMeta(1), pageMeta(2), pageMeta(3)]);
+    const odd = clusters.find((c) => c.parity === "odd")!; // pages 1 & 3
+    const even = clusters.find((c) => c.parity === "even")!; // page 2
+
+    // Two rects on the odd cluster -> pages 1 and 3 are each multiplied by 2.
+    // Output page order (1-based): p1a=1, p1b=2, p2=3, p3a=4, p3b=5.
+    const out = await runCrop(source, {
+      [odd.id]: [rect(0, 0, W / 2, H, "a"), rect(W / 2, 0, W / 2, H, "b")],
+      [even.id]: [rect(0, 0, W, H, "a")],
+    });
+
+    expect(out.outputPageCount).toBe(5);
+    expect(out.outlinePreserved).toBe(true);
+
+    const doc = await PDFDocument.load(out.bytes);
+    const bookmarks = readNamedOutlines(doc);
+    expect(bookmarks.map((b) => b.title)).toEqual(["Page 1", "Page 2", "Page 3"]);
+    // Outline items still reference destinations by name (not flattened).
+    expect(bookmarks.map((b) => b.destName)).toEqual(["page1", "page2", "page3"]);
+
+    // Each name now resolves through the output's `/Names /Dests` to the FIRST
+    // output copy of its original page (without the carried name tree the
+    // names would dangle and these would be undefined).
+    expect(firstOutputIndexOf(doc, resolveNamedDest(doc, "page1")!.objectNumber)).toBe(1);
+    expect(firstOutputIndexOf(doc, resolveNamedDest(doc, "page2")!.objectNumber)).toBe(3);
+    expect(firstOutputIndexOf(doc, resolveNamedDest(doc, "page3")!.objectNumber)).toBe(4);
   });
 });

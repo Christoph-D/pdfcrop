@@ -1,4 +1,4 @@
-import { PDFDocument } from "pdf-lib";
+import { PDFDocument, PDFArray, PDFDict, PDFName, PDFRef, PDFStream, type PDFContext, type PDFObject } from "pdf-lib";
 import type { Cluster } from "./cluster";
 import { pixelRectToRatios, ratiosToAbsoluteBox, rotateRatios, type Ratios } from "./ratios";
 import type { PdfSource } from "./types";
@@ -29,8 +29,10 @@ export interface CropOutput {
  *    OpenAction.
  *  - Multiplication (some page has >1 crop rect): a fresh output document is
  *    built by copying each source page N times, then assigning CropBox /
- *    MediaBox. The outline tree is dropped in this case because pdf-lib
- *    cannot shift outline destinations to follow multiplied pages.
+ *    MediaBox. The outline (bookmark) tree is carried over and its page
+ *    destinations are rewritten to point at the FIRST output copy of each
+ *    original page — the pdf-lib equivalent of Briss's
+ *    `SimpleBookmark.shiftPageNumbers` + `PdfStamper.setOutlines`.
  */
 export async function cropPdf(input: CropInput): Promise<CropOutput> {
   const { source, clusters, rectsByCluster, previews } = input;
@@ -98,12 +100,18 @@ export async function cropPdf(input: CropInput): Promise<CropOutput> {
   const pages = srcDoc.getPages();
   let outputIndex = 0;
   const copyRects: Array<{ outputIndex: number; pageNumber: number; ratiosIndex: number }> = [];
+  // Map each source page's object number to the ref of its first output copy.
+  // Outline destinations are rewritten to these refs so bookmarks survive page
+  // multiplication (see `copyOutlines`).
+  const firstCopyRefBySrcPage = new Map<number, PDFRef>();
   for (let pn = 1; pn <= pages.length; pn++) {
     const ratios = ratiosPerPage.get(pn)!;
     const copied = await outDoc.copyPages(srcDoc, [pn - 1]);
+    const srcPageRef = pages[pn - 1]!.ref;
     for (let r = 0; r < ratios.length; r++) {
       const copy = copied[0]!;
       outDoc.addPage(copy);
+      if (r === 0) firstCopyRefBySrcPage.set(srcPageRef.objectNumber, copy.ref);
       copyRects.push({ outputIndex, pageNumber: pn, ratiosIndex: r });
       outputIndex++;
     }
@@ -116,18 +124,13 @@ export async function cropPdf(input: CropInput): Promise<CropOutput> {
     applyCrop(outPage, ratios);
   }
 
-  // Outline policy: drop when multiplication occurred (destinations can no
-  // longer be remapped reliably).
-  try {
-    // pdf-lib doesn't expose deleteOutlines directly; reach into the catalog.
-    const catalog = outDoc.catalog as unknown as { delete: (k: string) => void };
-    catalog.delete("Outlines");
-  } catch {
-    // some PDFs have no outline tree; ignore
-  }
+  // Carry the outline tree over to the output, rewriting every destination
+  // page reference to the first output copy of the original page. Returns
+  // false (after dropping the tree) if it could not be copied safely.
+  const outlinesIntact = copyOutlines(srcDoc, outDoc, firstCopyRefBySrcPage);
 
   const bytes = await outDoc.save({ useObjectStreams: true });
-  return { bytes, outlinePreserved: false, outputPageCount: outputIndex };
+  return { bytes, outlinePreserved: outlinesIntact, outputPageCount: outputIndex };
 }
 
 /**
@@ -151,4 +154,102 @@ export function croppedFileName(original: string): string {
   const dot = original.lastIndexOf(".");
   const stem = dot > 0 ? original.slice(0, dot) : original;
   return `${stem}_cropped.pdf`;
+}
+
+/**
+ * Copy the source document's outline (bookmark) tree into the output document,
+ * rewriting every destination page reference to point at the FIRST output
+ * copy of the original page. This is the pdf-lib port of Briss's
+ * `SimpleBookmark.shiftPageNumbers` (run after page duplication) followed by
+ * `PdfStamper.setOutlines`.
+ *
+ * Returns `true` when the output's outline tree is intact — either the source
+ * had no outlines, or they were copied successfully. Returns `false` (after
+ * dropping the output's outline tree) if copying failed, so the caller can
+ * warn the user that bookmarks were lost.
+ */
+function copyOutlines(srcDoc: PDFDocument, outDoc: PDFDocument, firstCopyRefBySrcPage: Map<number, PDFRef>): boolean {
+  const outlinesValue = srcDoc.catalog.get(PDFName.of("Outlines"));
+  if (!outlinesValue) return true; // nothing to preserve
+
+  try {
+    const cloned = cloneOutlineObject(
+      outlinesValue,
+      srcDoc.context,
+      outDoc.context,
+      firstCopyRefBySrcPage,
+      new Map<number, PDFRef>(),
+    );
+    outDoc.catalog.set(PDFName.of("Outlines"), cloned);
+    return true;
+  } catch {
+    // Could not safely rewrite outline destinations. Drop the tree so we still
+    // emit a valid PDF, and signal that bookmarks were lost.
+    outDoc.catalog.delete(PDFName.of("Outlines"));
+    return false;
+  }
+}
+
+/**
+ * Deep-copy a single object of the outline tree from the source context into
+ * the destination context, rewriting page references via `pageMap` (source
+ * object number -> first-copy output ref). `visited` breaks the cycles the
+ * outline tree contains (every item links back to its `/Parent`, and `/First`
+ * links down to children).
+ */
+function cloneOutlineObject(
+  value: PDFObject,
+  srcCtx: PDFContext,
+  dstCtx: PDFContext,
+  pageMap: Map<number, PDFRef>,
+  visited: Map<number, PDFRef>,
+): PDFObject {
+  if (value instanceof PDFRef) {
+    // A destination page reference -> retarget to the first output copy.
+    const mapped = pageMap.get(value.objectNumber);
+    if (mapped) return mapped;
+    return cloneOutlineIndirect(value, srcCtx, dstCtx, pageMap, visited);
+  }
+  if (value instanceof PDFDict) {
+    const clone = PDFDict.withContext(dstCtx);
+    for (const [key, entry] of value.entries()) {
+      clone.set(key, cloneOutlineObject(entry, srcCtx, dstCtx, pageMap, visited));
+    }
+    return clone;
+  }
+  if (value instanceof PDFArray) {
+    const clone = PDFArray.withContext(dstCtx);
+    for (let i = 0; i < value.size(); i++) {
+      clone.push(cloneOutlineObject(value.get(i), srcCtx, dstCtx, pageMap, visited));
+    }
+    return clone;
+  }
+  if (value instanceof PDFStream) {
+    // Outline trees don't contain streams, but copy them faithfully anyway.
+    const clone = value.clone(dstCtx);
+    for (const [key, entry] of value.dict.entries()) {
+      clone.dict.set(key, cloneOutlineObject(entry, srcCtx, dstCtx, pageMap, visited));
+    }
+    return clone;
+  }
+  return value.clone();
+}
+
+/** Copy one indirect outline object (allocated a fresh ref) into `dstCtx`. */
+function cloneOutlineIndirect(
+  ref: PDFRef,
+  srcCtx: PDFContext,
+  dstCtx: PDFContext,
+  pageMap: Map<number, PDFRef>,
+  visited: Map<number, PDFRef>,
+): PDFRef {
+  const cached = visited.get(ref.objectNumber);
+  if (cached) return cached;
+  const newRef = dstCtx.nextRef();
+  visited.set(ref.objectNumber, newRef);
+  const srcObj = srcCtx.lookup(ref);
+  if (srcObj) {
+    dstCtx.assign(newRef, cloneOutlineObject(srcObj, srcCtx, dstCtx, pageMap, visited));
+  }
+  return newRef;
 }

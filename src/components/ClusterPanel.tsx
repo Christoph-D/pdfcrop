@@ -535,9 +535,10 @@ export default function ClusterPanel({ cluster, preview, previewUrl }: Props) {
       style={
         {
           // Auto-fit each panel to FIT_PADDING of the viewport height, then
-          // multiply by the manual zoom factor.
+          // multiply by the manual zoom factor. This is the panel's actual
+          // width (see .cluster-panel in CroppingView.css), so zoom scales it
+          // directly.
           "--fit-width": `calc(${FIT_PADDING} * (100vh - 120px) * ${imgW} / ${imgH} * ${zoom})`,
-          "--zoom": String(zoom),
         } as CSSProperties
       }
     >

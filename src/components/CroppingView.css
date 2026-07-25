@@ -309,10 +309,13 @@
 }
 
 .cluster-panel {
-  flex: 1 1 240px;
-  max-width: var(--fit-width, 600px);
-  /* Scale with zoom so panels can shrink below their default floor. */
-  min-width: calc(200px * var(--zoom, 1));
+  /* Size each panel directly to its fit-width (which already scales with
+     zoom) instead of using it merely as a max-width. Combined with
+     `flex: none` (no grow), this makes zoom continuously resize the panels:
+     previously flex-grow stretched panels to fill the row, which masked zoom
+     changes entirely until a wrap was forced by min-width. */
+  flex: none;
+  width: var(--fit-width, 600px);
 }
 
 .cluster-card {

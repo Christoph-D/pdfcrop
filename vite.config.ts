@@ -69,6 +69,12 @@ export default defineConfig({
       "@": path.resolve(__dirname, "src"),
     },
   },
+  server: {
+    watch: {
+      // Ignore hidden files and directories
+      ignored: [/(^|[/\\])\.[^/]/],
+    },
+  },
   worker: {
     format: "es",
   },

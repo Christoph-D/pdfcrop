@@ -231,6 +231,15 @@ function rect(x: number, y: number, w: number, h: number, id: string): CropRect 
   return { x, y, w, h, id };
 }
 
+/** Assert a page's MediaBox matches the given box, tolerating float drift. */
+function expectMediaBox(page: PDFPage, box: { x: number; y: number; width: number; height: number }): void {
+  const mb = page.getMediaBox();
+  expect(mb.x).toBeCloseTo(box.x, 6);
+  expect(mb.y).toBeCloseTo(box.y, 6);
+  expect(mb.width).toBeCloseTo(box.width, 6);
+  expect(mb.height).toBeCloseTo(box.height, 6);
+}
+
 async function runCrop(
   sourceData: Uint8Array,
   rectsByCluster: Record<string, CropRect[]>,
@@ -249,6 +258,90 @@ async function runCrop(
   };
   return cropPdf(input);
 }
+
+describe("cropPdf multiplication", () => {
+  // Each multiplied page must own an independent page leaf so it can carry its
+  // own CropBox/MediaBox. Earlier the multiplication path copied each source
+  // page once and added that same page object N times, aliasing one leaf; the
+  // first applyCrop then shrank the shared MediaBox and every later copy
+  // re-cropped the already-shrunk box, collapsing to a tiny white sliver.
+  it("gives each multiplied page an independent MediaBox (no compounding shrink)", async () => {
+    const doc = await PDFDocument.create();
+    doc.addPage([W, H]);
+    doc.addPage([W, H]);
+    doc.addPage([W, H]);
+    const source = await doc.save();
+
+    const clusters = clusterPages([pageMeta(1), pageMeta(2), pageMeta(3)]);
+    const odd = clusters.find((c) => c.parity === "odd")!; // pages 1 & 3
+    const even = clusters.find((c) => c.parity === "even")!; // page 2
+
+    // Split each odd page into left/right halves (two rects -> multiplied by
+    // 2); the even page keeps a single full-page rect. Output order
+    // (1-based): p1-left=1, p1-right=2, p2=3, p3-left=4, p3-right=5.
+    const out = await runCrop(source, {
+      [odd.id]: [rect(0, 0, W / 2, H, "a"), rect(W / 2, 0, W / 2, H, "b")],
+      [even.id]: [rect(0, 0, W, H, "a")],
+    });
+
+    expect(out.outputPageCount).toBe(5);
+    expect(out.outlinePreserved).toBe(true);
+
+    const cropped = await PDFDocument.load(out.bytes);
+    const pages = cropped.getPages();
+
+    // Left half of page 1: MediaBox [0, 0, W/2, H].
+    expectMediaBox(pages[0]!, { x: 0, y: 0, width: W / 2, height: H });
+    // Right half of page 1: MediaBox [W/2, 0, W, H]. This is the key
+    // assertion — without the fix this copy aliases the left copy's leaf and
+    // re-crops an already-shrunk box, collapsing to a near-zero sliver.
+    expectMediaBox(pages[1]!, { x: W / 2, y: 0, width: W / 2, height: H });
+    // Even page is a single full-page crop.
+    expectMediaBox(pages[2]!, { x: 0, y: 0, width: W, height: H });
+    // Page 3 halves mirror page 1's.
+    expectMediaBox(pages[3]!, { x: 0, y: 0, width: W / 2, height: H });
+    expectMediaBox(pages[4]!, { x: W / 2, y: 0, width: W / 2, height: H });
+
+    // Each output page is a distinct page-tree entry, not N aliases of one
+    // leaf. (With the bug all multiplied copies share a single object number.)
+    const objNums = pages.map((p) => p.ref.objectNumber);
+    expect(new Set(objNums).size).toBe(objNums.length);
+  });
+
+  it("multiplies a single cluster's page by three with independent crop boxes", async () => {
+    const doc = await PDFDocument.create();
+    doc.addPage([W, H]);
+    doc.addPage([W, H]);
+    doc.addPage([W, H]);
+    const source = await doc.save();
+
+    const clusters = clusterPages([pageMeta(1), pageMeta(2), pageMeta(3)]);
+    const odd = clusters.find((c) => c.parity === "odd")!;
+    const even = clusters.find((c) => c.parity === "even")!;
+
+    // Three equal vertical strips on the odd cluster, plus a full page on even.
+    // Output (1-based): p1-a=1, p1-b=2, p1-c=3, p2=4, p3-a=5, p3-b=6, p3-c=7.
+    const strip = W / 3;
+    const out = await runCrop(source, {
+      [odd.id]: [rect(0, 0, strip, H, "a"), rect(strip, 0, strip, H, "b"), rect(strip * 2, 0, strip, H, "c")],
+      [even.id]: [rect(0, 0, W, H, "a")],
+    });
+
+    expect(out.outputPageCount).toBe(7);
+
+    const cropped = await PDFDocument.load(out.bytes);
+    const pages = cropped.getPages();
+    // All three strips of page 1 are full-height and a third of the width,
+    // each anchored at its own x offset — not a compounding sliver.
+    expectMediaBox(pages[0]!, { x: 0, y: 0, width: W / 3, height: H });
+    expectMediaBox(pages[1]!, { x: W / 3, y: 0, width: W / 3, height: H });
+    expectMediaBox(pages[2]!, { x: (W / 3) * 2, y: 0, width: W / 3, height: H });
+    expectMediaBox(pages[3]!, { x: 0, y: 0, width: W, height: H });
+
+    const objNums = pages.map((p) => p.ref.objectNumber);
+    expect(new Set(objNums).size).toBe(objNums.length);
+  });
+});
 
 describe("cropPdf outline preservation", () => {
   it("shifts bookmark targets to the first copy when a cluster is multiplied", async () => {

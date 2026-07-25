@@ -1,6 +1,8 @@
 import { test, expect } from "@playwright/test";
 import path from "node:path";
+import fs from "node:fs";
 import { fileURLToPath } from "node:url";
+import { PDFDocument } from "pdf-lib";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SAMPLE_PDF = path.resolve(__dirname, "fixtures/sample.pdf");
@@ -143,5 +145,94 @@ test.describe("PDF crop happy path", () => {
       page.getByRole("button", { name: "Download" }).click(),
     ]);
     expect(download.suggestedFilename()).toBe("sample_cropped.pdf");
+  });
+
+  test("multiplies a cluster's pages for multiple crop rects with no slivers", async ({ page }) => {
+    test.setTimeout(60_000);
+    // Force the <a download> fallback so we can capture the cropped PDF as a
+    // real download event and read its bytes back for inspection.
+    await page.addInitScript(() => {
+      (window as unknown as { showSaveFilePicker?: unknown }).showSaveFilePicker = undefined;
+    });
+    await page.goto("/");
+    await page.locator('input[type="file"]').first().setInputFiles(SAMPLE_PDF);
+    await expect(page.locator(".cropping-view__title")).toHaveText("sample.pdf", { timeout: 30_000 });
+
+    // 4-page fixture -> two parity clusters (odd pages 1&3, even pages 2&4),
+    // each auto-seeding one crop rect.
+    await expect(page.locator(".cropping-view__count")).toContainText("2 clusters");
+    await expect(page.locator(".cluster-panel__crop-rect")).toHaveCount(2);
+
+    // Draw a second rect on the first (odd) cluster so each of its pages
+    // (1 and 3) is emitted twice in the output.
+    const oddSvg = page.locator(".cluster-panel__svg").first();
+    const box = (await oddSvg.boundingBox())!;
+    const x0 = box.x + box.width * 0.2;
+    const y0 = box.y + box.height * 0.2;
+    const x1 = box.x + box.width * 0.8;
+    const y1 = box.y + box.height * 0.8;
+    await page.mouse.move(x0, y0);
+    await page.mouse.down();
+    await page.mouse.move(x1, y1, { steps: 5 });
+    await page.mouse.up();
+    // Odd cluster now has two rects, even still has one.
+    await expect(page.locator(".cluster-panel__crop-rect")).toHaveCount(3);
+
+    const [download] = await Promise.all([
+      page.waitForEvent("download"),
+      page.getByRole("button", { name: "Download" }).click(),
+    ]);
+    expect(download.suggestedFilename()).toBe("sample_cropped.pdf");
+
+    const dlPath = await download.path();
+    expect(dlPath).toBeTruthy();
+    const bytes = new Uint8Array(fs.readFileSync(dlPath!));
+    const doc = await PDFDocument.load(bytes);
+    const pages = doc.getPages();
+
+    // Output order: page1 x2, page2 x1, page3 x2, page4 x1 = 6 pages.
+    expect(pages.length).toBe(6);
+
+    // Every output page owns an independent page leaf. The bug aliased one
+    // leaf across all multiplied copies, so two pages shared an object number.
+    const objNums = pages.map((p) => p.ref.objectNumber);
+    expect(new Set(objNums).size).toBe(objNums.length);
+
+    // Each crop stays within the original page bounds and has positive area
+    // (i.e. every page is a real crop, not a degenerate box).
+    for (const p of pages) {
+      const mb = p.getMediaBox();
+      expect(mb.width).toBeGreaterThan(0);
+      expect(mb.height).toBeGreaterThan(0);
+      expect(mb.x).toBeGreaterThanOrEqual(0);
+      expect(mb.y).toBeGreaterThanOrEqual(0);
+      expect(mb.x + mb.width).toBeLessThanOrEqual(595);
+      expect(mb.y + mb.height).toBeLessThanOrEqual(842);
+    }
+
+    // The two copies of source page 1 (output pages 1 and 2) are cropped
+    // independently: their MediaBoxes differ. With the bug they were identical
+    // because both aliased the same page leaf.
+    const p1a = pages[0]!.getMediaBox();
+    const p1b = pages[1]!.getMediaBox();
+    const identical = p1a.x === p1b.x && p1a.y === p1b.y && p1a.width === p1b.width && p1a.height === p1b.height;
+    expect(identical).toBe(false);
+
+    // The drawn rect is a 20%-margin crop (dragged from 20% to 80%), so its
+    // ratios are [0.2, 0.2, 0.2, 0.2]. Each multiplied copy must show that crop
+    // applied ONCE to the original 595x842 page -> MediaBox [119, 168.4,
+    // 357x505.2]. With the bug the second copy compounded on the auto-seed
+    // copy's already-shrunk leaf and collapsed to an ~18.6pt sliver. A 5pt
+    // tolerance absorbs cross-browser preview rounding while still rejecting
+    // the bug (whose height differs by ~480 points).
+    const expectDrawnCrop = (p: (typeof pages)[number]) => {
+      const mb = p.getMediaBox();
+      expect(Math.abs(mb.x - 119)).toBeLessThan(5);
+      expect(Math.abs(mb.y - 168.4)).toBeLessThan(5);
+      expect(Math.abs(mb.width - 357)).toBeLessThan(5);
+      expect(Math.abs(mb.height - 505.2)).toBeLessThan(5);
+    };
+    expectDrawnCrop(pages[1]!); // page 1's second (drawn) copy
+    expectDrawnCrop(pages[4]!); // page 3's second (drawn) copy
   });
 });

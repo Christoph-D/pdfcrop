@@ -106,9 +106,17 @@ export async function cropPdf(input: CropInput): Promise<CropOutput> {
   const firstCopyRefBySrcPage = new Map<number, PDFRef>();
   for (let pn = 1; pn <= pages.length; pn++) {
     const ratios = ratiosPerPage.get(pn)!;
-    const copied = await outDoc.copyPages(srcDoc, [pn - 1]);
     const srcPageRef = pages[pn - 1]!.ref;
     for (let r = 0; r < ratios.length; r++) {
+      // Copy the source page once PER rect so every output page owns an
+      // independent PDFPageLeaf. Copying once and adding the same page object
+      // N times would alias a single leaf across all N output pages, so the
+      // first applyCrop would shrink its MediaBox and every later copy would
+      // re-read that already-shrunk box as its basis — compounding the crop
+      // into a tiny white sliver. One fresh copy per rect gives each page its
+      // own CropBox/MediaBox to stamp (matches Briss, which duplicates pages
+      // then stamps each).
+      const copied = await outDoc.copyPages(srcDoc, [pn - 1]);
       const copy = copied[0]!;
       outDoc.addPage(copy);
       if (r === 0) firstCopyRefBySrcPage.set(srcPageRef.objectNumber, copy.ref);

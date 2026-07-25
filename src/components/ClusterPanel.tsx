@@ -10,7 +10,7 @@ import {
   type PixelRect,
   ratiosToPixelRect,
 } from "@/lib/pdf/ratios";
-import { useWorkspaceStore } from "@/store/workspaceStore";
+import { FIT_PADDING, useWorkspaceStore } from "@/store/workspaceStore";
 import { newRectId, useCropStore, type CropRect, type SizeAnchor } from "@/store/cropStore";
 import "./ClusterPanel.css";
 
@@ -95,6 +95,7 @@ function anchorForHandle(handle: Handle): SizeAnchor {
 export default function ClusterPanel({ cluster, preview, previewUrl }: Props) {
   const imgW = preview.width;
   const imgH = preview.height;
+  const zoom = useWorkspaceStore((s) => s.zoom);
   const rects = useCropStore((s) => s.rectsByCluster[cluster.id] ?? []);
   const selectedRectId = useCropStore((s) => s.selectedRectId);
   const selectedClusterId = useCropStore((s) => s.selectedClusterId);
@@ -368,7 +369,10 @@ export default function ClusterPanel({ cluster, preview, previewUrl }: Props) {
       className="cluster-panel"
       style={
         {
-          "--fit-width": `calc((100vh - 120px) * ${imgW} / ${imgH})`,
+          // Auto-fit each panel to FIT_PADDING of the viewport height, then
+          // multiply by the manual zoom factor.
+          "--fit-width": `calc(${FIT_PADDING} * (100vh - 120px) * ${imgW} / ${imgH} * ${zoom})`,
+          "--zoom": String(zoom),
         } as CSSProperties
       }
     >

@@ -180,6 +180,53 @@
   cursor: pointer;
 }
 
+.cropping-view__zoom {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: #2b2b2b;
+  border: 1px solid #3a3a3a;
+  border-radius: 6px;
+  padding: 2px;
+}
+
+.cropping-view__zoom-btn,
+.cropping-view__zoom-readout,
+.cropping-view__zoom-fit {
+  background: transparent;
+  color: #ddd;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  border-radius: 4px;
+  padding: 4px 8px;
+}
+
+.cropping-view__zoom-btn {
+  font-weight: 600;
+  min-width: 24px;
+}
+
+.cropping-view__zoom-readout {
+  font-variant-numeric: tabular-nums;
+  min-width: 44px;
+  text-align: center;
+}
+
+.cropping-view__zoom-btn:hover,
+.cropping-view__zoom-readout:hover,
+.cropping-view__zoom-fit:hover {
+  background: #3a3a3a;
+}
+
+.cropping-view__grid {
+  cursor: grab;
+}
+
+.cropping-view__grid--panning {
+  cursor: grabbing;
+}
+
 .cropping-view__grid {
   display: flex;
   flex-wrap: wrap;
@@ -193,7 +240,8 @@
 .cluster-panel {
   flex: 1 1 240px;
   max-width: var(--fit-width, 600px);
-  min-width: 200px;
+  /* Scale with zoom so panels can shrink below their default floor. */
+  min-width: calc(200px * var(--zoom, 1));
 }
 
 .cluster-card {

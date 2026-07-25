@@ -4,6 +4,7 @@
   flex-direction: column;
   align-items: stretch;
   padding: 4px;
+  cursor: default;
 }
 
 .cluster-panel__svg {

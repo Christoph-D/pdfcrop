@@ -1,5 +1,5 @@
-import { useMemo, useRef, useState } from "react";
-import { useWorkspaceStore } from "@/store/workspaceStore";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useWorkspaceStore, ZOOM_STEP } from "@/store/workspaceStore";
 import { useCropStore } from "@/store/cropStore";
 import { usePdfLoader } from "@/hooks/usePdfLoader";
 import ClusterPanel from "@/components/ClusterPanel";
@@ -13,14 +13,75 @@ export default function CroppingView() {
   const error = useWorkspaceStore((s) => s.error);
   const lastCrop = useWorkspaceStore((s) => s.lastCrop);
   const cropAndSave = useWorkspaceStore((s) => s.cropAndSave);
+  const zoom = useWorkspaceStore((s) => s.zoom);
+  const zoomIn = useWorkspaceStore((s) => s.zoomIn);
+  const zoomOut = useWorkspaceStore((s) => s.zoomOut);
+  const fitToWindow = useWorkspaceStore((s) => s.fitToWindow);
   const syncSizes = useCropStore((s) => s.syncSizes);
   const setSyncSizes = useCropStore((s) => s.setSyncSizes);
   const propagateSizeFromRect = useCropStore((s) => s.propagateSizeFromRect);
   const { handleFile } = usePdfLoader();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const gridRef = useRef<HTMLDivElement>(null);
+  const panRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    scrollLeft: number;
+    scrollTop: number;
+  } | null>(null);
   const [outlineDismissed, setOutlineDismissed] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const [isPanning, setIsPanning] = useState(false);
   const dragDepth = useRef(0);
+
+  // Ctrl/Cmd + wheel zooms; a plain wheel scrolls the container as usual.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      const factor = Math.pow(ZOOM_STEP, -e.deltaY / 100);
+      useWorkspaceStore.getState().zoomBy(factor);
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
+
+  const onGridPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    // Only start panning from the grid background — panels handle their own
+    // pointer events (drawing / moving crop rectangles).
+    if (e.target !== gridRef.current) return;
+    if (e.button !== 0) return;
+    const el = scrollRef.current!;
+    panRef.current = {
+      pointerId: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
+      scrollLeft: el.scrollLeft,
+      scrollTop: el.scrollTop,
+    };
+    gridRef.current.setPointerCapture(e.pointerId);
+    setIsPanning(true);
+  };
+
+  const onGridPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const pan = panRef.current;
+    if (!pan || pan.pointerId !== e.pointerId) return;
+    const el = scrollRef.current!;
+    el.scrollLeft = pan.scrollLeft - (e.clientX - pan.startX);
+    el.scrollTop = pan.scrollTop - (e.clientY - pan.startY);
+  };
+
+  const endGridPan = (e: React.PointerEvent<HTMLDivElement>) => {
+    const pan = panRef.current;
+    if (!pan || pan.pointerId !== e.pointerId) return;
+    gridRef.current?.releasePointerCapture(e.pointerId);
+    panRef.current = null;
+    setIsPanning(false);
+  };
 
   const showOutlineWarning = lastCrop && !lastCrop.outlinePreserved && !outlineDismissed;
 
@@ -60,6 +121,7 @@ export default function CroppingView() {
   return (
     <div
       className="cropping-view"
+      ref={scrollRef}
       onDragEnter={(e) => {
         e.preventDefault();
         dragDepth.current += 1;
@@ -111,6 +173,32 @@ export default function CroppingView() {
           Synchronize sizes
         </label>
         <div className="cropping-view__spacer" />
+        <div className="cropping-view__zoom" role="group" aria-label="Zoom">
+          <button
+            type="button"
+            className="cropping-view__zoom-btn"
+            onClick={zoomOut}
+            aria-label="Zoom out"
+            title="Zoom out"
+          >
+            −
+          </button>
+          <button type="button" className="cropping-view__zoom-readout" onClick={fitToWindow} title="Reset zoom to fit">
+            {Math.round(zoom * 100)}%
+          </button>
+          <button
+            type="button"
+            className="cropping-view__zoom-btn"
+            onClick={zoomIn}
+            aria-label="Zoom in"
+            title="Zoom in"
+          >
+            +
+          </button>
+          <button type="button" className="cropping-view__zoom-fit" onClick={fitToWindow} title="Fit to window">
+            Fit
+          </button>
+        </div>
         <button
           type="button"
           className="cropping-view__secondary"
@@ -139,7 +227,14 @@ export default function CroppingView() {
       )}
       {error && <div className="cropping-view__error">Error: {error}</div>}
 
-      <div className="cropping-view__grid">
+      <div
+        className={`cropping-view__grid${isPanning ? " cropping-view__grid--panning" : ""}`}
+        ref={gridRef}
+        onPointerDown={onGridPointerDown}
+        onPointerMove={onGridPointerMove}
+        onPointerUp={endGridPan}
+        onPointerCancel={endGridPan}
+      >
         {clusters.map((cluster) => {
           const preview = previews.find((p) => p.clusterId === cluster.id);
           if (!preview) {

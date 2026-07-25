@@ -162,6 +162,7 @@ export default function ClusterPanel({ cluster, preview, previewUrl }: Props) {
   const clearSelection = useCropStore((s) => s.clearSelection);
   const removeSelectedRects = useCropStore((s) => s.removeSelectedRects);
   const applyDeltaToSelectionExcept = useCropStore((s) => s.applyDeltaToSelectionExcept);
+  const applyDeltaToSelection = useCropStore((s) => s.applyDeltaToSelection);
   const setActiveCluster = useCropStore((s) => s.setActiveCluster);
   const copy = useCropStore((s) => s.copy);
   const paste = useCropStore((s) => s.paste);
@@ -411,17 +412,24 @@ export default function ClusterPanel({ cluster, preview, previewUrl }: Props) {
     [cluster.id, removeRect],
   );
 
-  // Keyboard shortcuts: Delete/Esc operate over the whole global selection,
-  // Escape also closes an open split context menu, and Ctrl/Cmd+C /
-  // Ctrl/Cmd+V copy/paste crop-rect layouts in memory. Every ClusterPanel
-  // registers this listener; the store actions are idempotent
-  // (removeSelectedRects clears the set, copy/paste are gated to the active
-  // cluster) so duplicate firings are no-ops.
+  // Keyboard shortcuts (mirrors Briss's `MergedPanelKeyAdapter`): Delete and
+  // the arrow-key move/resize act over the whole global selection, Escape
+  // deselects (and closes an open split menu), and Ctrl/Cmd+C / V copy/paste
+  // crop-rect layouts in memory. Arrow-key move/resize and copy/paste are
+  // gated to the active cluster so they fire exactly once even though every
+  // mounted ClusterPanel registers this listener — the actions themselves
+  // still operate on the global selection. Typing in a form field is left
+  // alone so the shortcuts never hijack text entry.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) {
+        return;
+      }
       const key = e.key.toLowerCase();
       const isCopyPaste = (key === "c" || key === "v") && (e.ctrlKey || e.metaKey);
-      if (e.key !== "Delete" && e.key !== "Backspace" && e.key !== "Escape" && !isCopyPaste) return;
+      const isArrow = e.key === "ArrowLeft" || e.key === "ArrowRight" || e.key === "ArrowUp" || e.key === "ArrowDown";
+      if (e.key !== "Delete" && e.key !== "Backspace" && e.key !== "Escape" && !isCopyPaste && !isArrow) return;
       if (e.key === "Escape") {
         if (menu) {
           setMenu(null);
@@ -430,8 +438,30 @@ export default function ClusterPanel({ cluster, preview, previewUrl }: Props) {
         clearSelection();
         return;
       }
-      // Copy/paste only act in the active cluster so they fire once.
-      if (isCopyPaste && useCropStore.getState().activeClusterId !== cluster.id) return;
+      // Move/resize and copy/paste fire from the active panel only, so the
+      // delta reaches the selection exactly once (the action still applies it
+      // to every selected rect, regardless of cluster).
+      if ((isArrow || isCopyPaste) && useCropStore.getState().activeClusterId !== cluster.id) return;
+      if (isArrow) {
+        if (useCropStore.getState().selectedRectIds.size === 0) return;
+        e.preventDefault();
+        // Base step is 1px; Shift scales it to 10px (Briss multiplies x/y).
+        let dx = 0;
+        let dy = 0;
+        if (e.key === "ArrowLeft") dx = -1;
+        else if (e.key === "ArrowRight") dx = 1;
+        else if (e.key === "ArrowUp") dy = -1;
+        else dy = 1; // ArrowDown
+        if (e.shiftKey) {
+          dx *= 10;
+          dy *= 10;
+        }
+        // Ctrl/Cmd resizes (top-left corner fixed) instead of moving — mirrors
+        // Briss's `resizeSelRects` vs `moveSelectedRects`.
+        const delta: RectDelta = e.ctrlKey || e.metaKey ? { dx: 0, dy: 0, dw: dx, dh: dy } : { dx, dy, dw: 0, dh: 0 };
+        applyDeltaToSelection(delta, buildDimsByCluster());
+        return;
+      }
       e.preventDefault();
       if (isCopyPaste) {
         if (key === "c") copy();
@@ -444,7 +474,7 @@ export default function ClusterPanel({ cluster, preview, previewUrl }: Props) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [clearSelection, cluster.id, copy, menu, paste, removeSelectedRects]);
+  }, [applyDeltaToSelection, clearSelection, cluster.id, copy, menu, paste, removeSelectedRects]);
 
   // Right-click on a rect: select it and offer the split actions.
   const onContextMenu = useCallback(

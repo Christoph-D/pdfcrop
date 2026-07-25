@@ -75,6 +75,14 @@ interface CropState {
     origins: Record<string, PixelRect>,
     dimsByCluster: Record<string, ClusterDims>,
   ) => void;
+  /**
+   * Apply a delta to every selected rect, each from its own current position
+   * and clamped to its cluster's image bounds. Used by keyboard nudging (arrow
+   * keys), where each keypress is an independent move/resize from the current
+   * geometry rather than a continuous drag from a captured origin. Mirrors
+   * Briss's `moveSelectedRects` / `resizeSelRects`.
+   */
+  applyDeltaToSelection: (delta: RectDelta, dimsByCluster: Record<string, ClusterDims>) => void;
   /** Mark a cluster as the paste target (set on pointer-down). */
   setActiveCluster: (clusterId: string) => void;
   /** Replace the clipboard with the currently selected rects (clears first). */
@@ -201,6 +209,27 @@ export const useCropStore = create<CropState>((set) => ({
           const orig = origins[r.id] ?? r;
           return moveRectByDelta(r, orig, delta, imgW, imgH);
         });
+      }
+      return { rectsByCluster };
+    }),
+  applyDeltaToSelection: (delta, dimsByCluster) =>
+    set((s) => {
+      if (s.selectedRectIds.size === 0) return {};
+      const rectsByCluster: ClusterCrops = {};
+      for (const [cid, list] of Object.entries(s.rectsByCluster)) {
+        // Preserve array identity for clusters with no selected rect so
+        // unaffected panels don't needlessly re-render.
+        if (!list.some((r) => s.selectedRectIds.has(r.id))) {
+          rectsByCluster[cid] = list;
+          continue;
+        }
+        const dims = dimsByCluster[cid];
+        const imgW = dims?.imgW ?? Number.POSITIVE_INFINITY;
+        const imgH = dims?.imgH ?? Number.POSITIVE_INFINITY;
+        // Each rect moves from its own current geometry (origin = rect).
+        rectsByCluster[cid] = list.map((r) =>
+          s.selectedRectIds.has(r.id) ? moveRectByDelta(r, r, delta, imgW, imgH) : r,
+        );
       }
       return { rectsByCluster };
     }),

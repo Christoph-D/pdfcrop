@@ -156,6 +156,64 @@ describe("applyDeltaToSelectionExcept", () => {
   });
 });
 
+describe("applyDeltaToSelection", () => {
+  const dims = {
+    [A]: { imgW: 200, imgH: 200 },
+    [B]: { imgW: 400, imgH: 400 },
+  };
+
+  it("moves every selected rect by the delta, clamped to image bounds", () => {
+    const { toggleSelect, applyDeltaToSelection } = useCropStore.getState();
+    toggleSelect("a1");
+    toggleSelect("b1");
+    applyDeltaToSelection({ dx: 5, dy: 7, dw: 0, dh: 0 }, dims);
+
+    const s = useCropStore.getState();
+    expect(s.rectsByCluster[A]!.find((r) => r.id === "a1")).toEqual(rect("a1", 15, 17, 40, 60));
+    expect(s.rectsByCluster[B]!.find((r) => r.id === "b1")).toEqual(rect("b1", 25, 27, 30, 30));
+    // Unselected rects are untouched.
+    expect(s.rectsByCluster[A]!.find((r) => r.id === "a2")).toEqual(rect("a2", 100, 100, 50, 50));
+  });
+
+  it("clamps each move to the cluster's image bounds", () => {
+    const { toggleSelect, applyDeltaToSelection } = useCropStore.getState();
+    toggleSelect("a2"); // x=100, w=50 in a 200x200 image -> maxX 150
+    toggleSelect("b1"); // x=20, w=30 in a 400x400 image -> maxX 370
+    applyDeltaToSelection({ dx: 500, dy: 0, dw: 0, dh: 0 }, dims);
+
+    const s = useCropStore.getState();
+    expect(s.rectsByCluster[A]!.find((r) => r.id === "a2")!.x).toBe(150);
+    expect(s.rectsByCluster[B]!.find((r) => r.id === "b1")!.x).toBe(370);
+  });
+
+  it("resizes every selected rect with the top-left fixed", () => {
+    const { toggleSelect, applyDeltaToSelection } = useCropStore.getState();
+    toggleSelect("a1"); // 10,10,40,60
+    toggleSelect("b1"); // 20,20,30,30
+    applyDeltaToSelection({ dx: 0, dy: 0, dw: 10, dh: -20 }, dims);
+
+    const s = useCropStore.getState();
+    expect(s.rectsByCluster[A]!.find((r) => r.id === "a1")).toEqual(rect("a1", 10, 10, 50, 40));
+    expect(s.rectsByCluster[B]!.find((r) => r.id === "b1")).toEqual(rect("b1", 20, 20, 40, 10));
+  });
+
+  it("never resizes a rect below 1px", () => {
+    const { toggleSelect, applyDeltaToSelection } = useCropStore.getState();
+    toggleSelect("b1"); // w=30, h=30
+    applyDeltaToSelection({ dx: 0, dy: 0, dw: -100, dh: -100 }, dims);
+
+    const b = useCropStore.getState().rectsByCluster[B]!.find((r) => r.id === "b1")!;
+    expect(b.w).toBe(1);
+    expect(b.h).toBe(1);
+  });
+
+  it("is a no-op when nothing is selected", () => {
+    const before = useCropStore.getState().rectsByCluster;
+    useCropStore.getState().applyDeltaToSelection({ dx: 5, dy: 5, dw: 0, dh: 0 }, dims);
+    expect(useCropStore.getState().rectsByCluster).toBe(before);
+  });
+});
+
 describe("cropStore copy/paste", () => {
   beforeEach(() => {
     useCropStore.getState().clearAll();

@@ -1,11 +1,15 @@
 import { useRef, useState } from "react";
 import { usePdfLoader } from "@/hooks/usePdfLoader";
+import { useLoadShortcut } from "@/hooks/useLoadShortcut";
 import "./StartScreen.css";
 
 export default function StartScreen() {
   const { isLoading, handleFile } = usePdfLoader();
   const [isDragging, setIsDragging] = useState(false);
   const dragDepth = useRef(0);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  // "L" accelerator opens the load-file picker (Briss menu shortcut).
+  useLoadShortcut(fileInputRef);
 
   return (
     <div
@@ -34,7 +38,13 @@ export default function StartScreen() {
           Drop a PDF here, or
           <label className="drop-zone__button">
             Choose file
-            <input type="file" accept="application/pdf,.pdf" hidden onChange={(e) => handleFile(e.target.files?.[0])} />
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="application/pdf,.pdf"
+              hidden
+              onChange={(e) => handleFile(e.target.files?.[0])}
+            />
           </label>
         </p>
         {isLoading && <p className="drop-zone__loading">Loading…</p>}

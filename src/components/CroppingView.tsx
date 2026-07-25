@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useWorkspaceStore, ZOOM_STEP } from "@/store/workspaceStore";
 import { useCropStore } from "@/store/cropStore";
 import { usePdfLoader } from "@/hooks/usePdfLoader";
+import { useLoadShortcut } from "@/hooks/useLoadShortcut";
 import { parsePageExcludes } from "@/lib/pdf/cluster";
 import ClusterPanel from "@/components/ClusterPanel";
 import "./CroppingView.css";
@@ -29,6 +30,8 @@ export default function CroppingView() {
   const propagateSizeFromRect = useCropStore((s) => s.propagateSizeFromRect);
   const { handleFile } = usePdfLoader();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // "L" accelerator opens the load-file picker (Briss menu shortcut).
+  useLoadShortcut(fileInputRef);
   const settingsInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import type { Cluster } from "@/lib/pdf/cluster";
 import type { GrayImage } from "@/lib/pdf/overlay";
 import { getAutoCropRatios } from "@/lib/pdf/autocrop";
@@ -185,6 +185,7 @@ export default function ClusterPanel({ cluster, preview, previewUrl }: Props) {
   const imgH = preview.height;
   const zoom = useWorkspaceStore((s) => s.zoom);
   const rects = useCropStore((s) => s.rectsByCluster[cluster.id] ?? []);
+  const rectsByCluster = useCropStore((s) => s.rectsByCluster);
   const selectedRectIds = useCropStore((s) => s.selectedRectIds);
   const syncSizes = useCropStore((s) => s.syncSizes);
   const addRect = useCropStore((s) => s.addRect);
@@ -579,6 +580,23 @@ export default function ClusterPanel({ cluster, preview, previewUrl }: Props) {
     alignSelectedRects({ x: rect.x, y: rect.y, w: rect.w, h: rect.h }, buildDimsByCluster());
   }, [alignSelectedRects, cluster.id, menu]);
 
+  // "Align selected" is only meaningful when at least 2 rects are selected
+  // AND no single cluster contributes more than one selected rect (aligning
+  // multiple rects in the same cluster would stack them on the same spot).
+  const canAlignSelected = useMemo(() => {
+    if (selectedRectIds.size < 2) return false;
+    for (const list of Object.values(rectsByCluster)) {
+      let count = 0;
+      for (const r of list) {
+        if (selectedRectIds.has(r.id)) {
+          count += 1;
+          if (count > 1) return false;
+        }
+      }
+    }
+    return true;
+  }, [selectedRectIds, rectsByCluster]);
+
   const cursor = cursorFor(hoverHandle);
 
   return (
@@ -712,9 +730,11 @@ export default function ClusterPanel({ cluster, preview, previewUrl }: Props) {
             <button type="button" role="menuitem" onClick={() => splitSelected("row")}>
               Split row
             </button>
-            <button type="button" role="menuitem" onClick={alignSelected}>
-              Align selected
-            </button>
+            {canAlignSelected && (
+              <button type="button" role="menuitem" onClick={alignSelected}>
+                Align selected
+              </button>
+            )}
           </div>
         </>
       )}

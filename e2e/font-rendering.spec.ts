@@ -10,10 +10,11 @@ const SAMPLE_PDF = path.resolve(__dirname, "fixtures/sample.pdf");
 
 test.describe("non-embedded font rendering", () => {
   test("renders glyphs from fetched standard-font data, not blank boxes", async ({ page }) => {
-    // Regression guard for the worker's pdf.js config. The render worker has
-    // no `document`, so pdf.js must run with `disableFontFace: true` and
-    // `useSystemFonts: false`; otherwise non-embedded fonts show up as blank
-    // boxes.
+    // Regression guard for the pdf.js font config used while rasterizing
+    // previews. Rendering happens on the main thread but still runs with
+    // `disableFontFace: true` and `useSystemFonts: false`; otherwise
+    // non-embedded fonts show up as blank boxes (especially in headless
+    // browsers without the base-14 fonts).
     const standardFontUrls: string[] = [];
     page.on("response", (res) => {
       const u = res.url();

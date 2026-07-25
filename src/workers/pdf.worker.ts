@@ -1,188 +1,25 @@
 /// <reference lib="webworker" />
 import * as Comlink from "comlink";
-import * as pdfjsLib from "pdfjs-dist";
-// Importing the worker module populates `globalThis.pdfjsWorker`, which lets
-// pdf.js run in-thread inside this Comlink worker (see `_setupFakeWorkerGlobal`
-// + `disableWorker` below) without needing a `workerSrc`.
-import "pdfjs-dist/build/pdf.worker.mjs";
-import { calculateOverlay, type GrayImage, MAX_PAGE_HEIGHT } from "@/lib/pdf/overlay";
+import { calculateOverlay, type GrayImage } from "@/lib/pdf/overlay";
 
-// pdf.js inside a worker: disable its own nested worker, run in-thread.
-// `document` is undefined here, so pdf.js's default DOMCanvasFactory /
-// DOMFilterFactory (which call `document.createElement(...)`) crash with
-// "Cannot read properties of undefined (reading 'createElement')". Supply
-// OffscreenCanvas-based replacements.
+// This worker used to host pdf.js itself (rasterizing pages in-thread via the
+// pdf.js "fake worker"). That deadlocked in Firefox the moment a second
+// `page.render()` was issued on the same document — large PDFs (many pages per
+// pooled worker) hung forever at "Rendering previews… 0/N", and even a single
+// worker stalled after its first page. Chrome was unaffected, and the Firefox
+// failure was dev-server-only (production builds worked), which is why it went
+// unnoticed with a Chromium-only E2E suite.
+//
+// pdf.js rendering now runs on the main thread (where pdf.js already has a
+// real worker via `GlobalWorkerOptions.workerPort`, the standard path that
+// Firefox is happy with). This worker is kept only for the CPU-intensive,
+// pdf.js-independent work: merging a cluster's page images into one preview.
 
-/**
- * Canvas factory backed by `OffscreenCanvas` (available in Web Workers),
- * replacing pdf.js's `DOMCanvasFactory` which needs `document`.
- */
-class WorkerCanvasFactory {
-  create(width: number, height: number) {
-    if (width <= 0 || height <= 0) {
-      throw new Error("Invalid canvas size");
-    }
-    const canvas = new OffscreenCanvas(width, height);
-    return {
-      canvas,
-      context: canvas.getContext("2d", { willReadFrequently: true }),
-    };
-  }
-  reset(canvasAndContext: { canvas: OffscreenCanvas }, width: number, height: number) {
-    canvasAndContext.canvas.width = width;
-    canvasAndContext.canvas.height = height;
-  }
-  destroy(canvasAndContext: { canvas: OffscreenCanvas }) {
-    canvasAndContext.canvas.width = 0;
-    canvasAndContext.canvas.height = 0;
-  }
-  _createCanvas(width: number, height: number): OffscreenCanvas {
-    return new OffscreenCanvas(width, height);
-  }
+async function computeClusterOverlay(images: GrayImage[]): Promise<GrayImage | null> {
+  return calculateOverlay(images);
 }
 
-/**
- * No-op filter factory mirroring pdf.js's `BaseFilterFactory`. The default
- * `DOMFilterFactory` builds SVG `<defs>` via `document`, which is unavailable
- * in a worker; returning "none" is correct for plain page rasterization.
- */
-class WorkerFilterFactory {
-  addFilter(): string {
-    return "none";
-  }
-  addHCMFilter(): string {
-    return "none";
-  }
-  addAlphaFilter(): string {
-    return "none";
-  }
-  addLuminosityFilter(): string {
-    return "none";
-  }
-  addHighlightHCMFilter(): string {
-    return "none";
-  }
-  destroy(): void {}
-}
-
-// Worker-context canvas/filter/font plumbing for pdf.js (see file header).
-const getDocDefaults = {
-  isEvalSupported: false,
-  disableWorker: true,
-  CanvasFactory: WorkerCanvasFactory,
-  FilterFactory: WorkerFilterFactory,
-  // This thread has no `document`, so the Font Loading API
-  // (`isFontLoadingAPISupported` = `!!document.fonts`) is unavailable and
-  // `@font-face` rules can't be inserted. `disableFontFace` makes pdf.js draw
-  // each glyph as a path from the font's own outlines instead of via
-  // `ctx.fillText`. `useSystemFonts` must be false too: with it true pdf.js
-  // skips fetching standard-font data (returning null) and tries to register a
-  // system font (`loadSystemFont`), which hits pdf.js's `unreachable(...)
-  // branch (no Font Loading API in this thread) and leaves glyphs as blank
-  // boxes. Together these force pdf.js to fetch the real standard-font data
-  // (e.g. LiberationSans-*.ttf) from `standardFontDataUrl` and render its
-  // outlines.
-  disableFontFace: true,
-  useSystemFonts: false,
-} as const;
-
-export interface DocumentConfig {
-  data: ArrayBuffer;
-  /** Absolute URL prefix (trailing slash) for pdf.js standard fonts. */
-  standardFontDataUrl?: string;
-  /** Absolute URL prefix (trailing slash) for packed pdf.js CMaps. */
-  cMapUrl?: string;
-}
-
-export interface DocumentHandle {
-  /** Opaque id of a document loaded into this worker via `loadDocument`. */
-  id: number;
-  numPages: number;
-}
-
-export interface RenderedPage {
-  pageNumber: number;
-  image: GrayImage;
-}
-
-export interface OverlayResult {
-  clusterId: string;
-  preview: GrayImage;
-}
-
-// Documents loaded once and reused across many page renders. This mirrors
-// Briss's `PDFImageExtractor`, which opens the PDF a single time and renders
-// every page from that one document instead of re-parsing it for each page.
-// In a worker pool each worker holds its own copy and renders a slice of the
-// pages, so the (expensive) parse happens once per worker rather than once per
-// page.
-const documents = new Map<number, pdfjsLib.PDFDocumentProxy>();
-let nextDocId = 1;
-
-async function loadDocument(config: DocumentConfig): Promise<DocumentHandle> {
-  const doc = await pdfjsLib.getDocument({
-    data: config.data,
-    ...getDocDefaults,
-    // Required for non-embedded standard fonts and named-CMap CID fonts;
-    // without them those glyphs render as blank boxes.
-    standardFontDataUrl: config.standardFontDataUrl,
-    cMapUrl: config.cMapUrl,
-    cMapPacked: true,
-    // Fetch CMaps/standard fonts in-thread. Left to its default, pdf.js would
-    // evaluate `document.baseURI` while computing `useWorkerFetch`, but
-    // `document` is undefined in this worker (it would throw). Setting it
-    // explicitly short-circuits that and delivers the URLs to the worker's
-    // evaluator, which fetches them with `fetch()`.
-    useWorkerFetch: true,
-  }).promise;
-  const id = nextDocId++;
-  documents.set(id, doc);
-  return { id, numPages: doc.numPages };
-}
-
-async function renderPage(docId: number, pageNumber: number, targetHeight = MAX_PAGE_HEIGHT): Promise<RenderedPage> {
-  const doc = documents.get(docId);
-  if (!doc) throw new Error(`renderPage: document ${docId} is not loaded`);
-  const page = await doc.getPage(pageNumber);
-  const baseViewport = page.getViewport({ scale: 1 });
-  const scale = targetHeight / baseViewport.height;
-  const viewport = page.getViewport({ scale });
-  const width = Math.max(1, Math.round(viewport.width));
-  const height = Math.max(1, Math.round(viewport.height));
-  const canvas = new OffscreenCanvas(width, height);
-  const ctx = canvas.getContext("2d", { willReadFrequently: true }) as OffscreenCanvasRenderingContext2D;
-  ctx.fillStyle = "#ffffff";
-  ctx.fillRect(0, 0, width, height);
-  await page.render({
-    canvasContext: ctx as unknown as CanvasRenderingContext2D,
-    viewport,
-    background: "white",
-  }).promise;
-  const img = ctx.getImageData(0, 0, width, height);
-  const gray = new Uint8Array(width * height);
-  for (let i = 0, j = 0; i < img.data.length; i += 4, j++) {
-    gray[j] = (img.data[i]! * 0.299 + img.data[i + 1]! * 0.587 + img.data[i + 2]! * 0.114) | 0;
-  }
-  // Release this page's cached resources; the document itself stays open for
-  // the next render (see `unloadDocument`).
-  page.cleanup();
-  return { pageNumber, image: { width, height, data: gray } };
-}
-
-async function unloadDocument(docId: number): Promise<void> {
-  const doc = documents.get(docId);
-  if (!doc) return;
-  documents.delete(docId);
-  await doc.destroy();
-}
-
-async function computeClusterOverlay(clusterId: string, pages: RenderedPage[]): Promise<OverlayResult | null> {
-  const preview = calculateOverlay(pages.map((p) => p.image));
-  if (!preview) return null;
-  return { clusterId, preview };
-}
-
-const api = { loadDocument, renderPage, unloadDocument, computeClusterOverlay };
+const api = { computeClusterOverlay };
 Comlink.expose(api);
 
 export type PdfWorkerApi = typeof api;

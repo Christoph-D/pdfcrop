@@ -1,7 +1,9 @@
 import * as Comlink from "comlink";
+import * as pdfjsLib from "pdfjs-dist";
 import type { Cluster } from "./cluster";
 import type { GrayImage } from "./overlay";
-import type { DocumentConfig, DocumentHandle, PdfWorkerApi, RenderedPage } from "@/workers/pdf.worker";
+import { MAX_PAGE_HEIGHT } from "./overlay";
+import type { PdfWorkerApi } from "@/workers/pdf.worker";
 
 export interface ClusterPreview {
   clusterId: string;
@@ -9,75 +11,58 @@ export interface ClusterPreview {
   previewUrl: string;
 }
 
-interface WorkerHandle {
-  api: PdfWorkerApi;
-  /** Document loaded into this worker (parsed once, reused for every page). */
-  handle?: DocumentHandle;
-  /** Approximate count of in-flight tasks, for least-busy scheduling. */
-  inFlight: number;
-  terminate: () => void;
-}
+/**
+ * How many pages to rasterize at once. pdf.js offloads the actual rasterization
+ * to its own worker, so the main thread here only coordinates renders and reads
+ * back pixels; a small amount of overlap keeps large PDFs progressing without
+ * flooding the main thread.
+ */
+const RENDER_CONCURRENCY = 4;
 
-function createWorker(): WorkerHandle {
+function createOverlayWorker(): { api: PdfWorkerApi; terminate: () => void } {
   const worker = new Worker(new URL("../../workers/pdf.worker.ts", import.meta.url), {
     type: "module",
   });
-  return { api: Comlink.wrap<PdfWorkerApi>(worker), inFlight: 0, terminate: () => worker.terminate() };
+  return { api: Comlink.wrap<PdfWorkerApi>(worker), terminate: () => worker.terminate() };
 }
 
-/**
- * Fixed-size pool of render workers. Each task (page rasterization, overlay
- * computation) is dispatched to the least-busy worker so the heavy work for
- * large PDFs runs in parallel instead of serializing through a single worker.
- */
-class WorkerPool {
-  readonly workers: readonly WorkerHandle[];
-
-  constructor(size: number) {
-    this.workers = Array.from({ length: size }, createWorker);
+/** Rasterize one page to a grayscale image at most `MAX_PAGE_HEIGHT` tall. */
+async function renderPageToGray(doc: pdfjsLib.PDFDocumentProxy, pageNumber: number): Promise<GrayImage> {
+  const page = await doc.getPage(pageNumber);
+  const baseViewport = page.getViewport({ scale: 1 });
+  const scale = MAX_PAGE_HEIGHT / baseViewport.height;
+  const viewport = page.getViewport({ scale });
+  const width = Math.max(1, Math.round(viewport.width));
+  const height = Math.max(1, Math.round(viewport.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, width, height);
+  await page.render({
+    canvasContext: ctx,
+    viewport,
+    background: "white",
+  }).promise;
+  const img = ctx.getImageData(0, 0, width, height);
+  const gray = new Uint8Array(width * height);
+  for (let i = 0, j = 0; i < img.data.length; i += 4, j++) {
+    gray[j] = (img.data[i]! * 0.299 + img.data[i + 1]! * 0.587 + img.data[i + 2]! * 0.114) | 0;
   }
-
-  /** Fewest in-flight tasks; ties resolve to the earliest worker. */
-  pick(): WorkerHandle {
-    let best = this.workers[0]!;
-    for (const w of this.workers) {
-      if (w.inFlight < best.inFlight) best = w;
-    }
-    return best;
-  }
-
-  terminate(): void {
-    for (const w of this.workers) w.terminate();
-  }
-}
-
-/** Smallest pool worth spinning up once there is enough work to split. */
-const MIN_POOL_SIZE = 2;
-/** Cap so many-core hosts don't pay for redundant PDF parses / workers. */
-const MAX_POOL_SIZE = 8;
-
-/**
- * Choose a pool size that scales with the host but never exceeds the amount of
- * parallelizable work. A single page (or none) keeps a single worker so small
- * PDFs aren't penalized by needless worker startup.
- */
-function pickPoolSize(workUnits: number): number {
-  if (workUnits <= 1) return 1;
-  const cores = (typeof navigator !== "undefined" && navigator.hardwareConcurrency) || 4;
-  // Reserve a core for the main thread (UI / progress / data-URL encoding).
-  const byCores = Math.min(MAX_POOL_SIZE, Math.max(MIN_POOL_SIZE, cores - 1));
-  return Math.min(byCores, workUnits);
+  // Release this page's cached resources; the document itself stays open for
+  // the next render.
+  page.cleanup();
+  return { width, height, data: gray };
 }
 
 /**
  * Renders the sampled pages for each cluster and computes a merged preview.
  *
- * Work is spread across a pool of workers (sized to the host) rather than a
- * single worker. Each worker parses the PDF once and then renders many pages
- * from that one document — mirroring Briss's `PDFImageExtractor`, which opens
- * the PDF a single time instead of re-parsing it per page. Both the per-page
- * rasterization and the per-cluster overlay math are dispatched to the
- * least-busy worker. Progress is reported as pages complete (0..1).
+ * Rasterization runs on the main thread through pdf.js's own worker (the
+ * standard, browser-portable path). The per-cluster overlay math — the
+ * genuinely CPU-heavy, pdf.js-independent step — is dispatched to a Web Worker
+ * so it never blocks the UI. Progress is reported as pages complete (0..1).
  */
 export async function renderClusterPreviews(
   data: ArrayBuffer,
@@ -87,93 +72,72 @@ export async function renderClusterPreviews(
   const jobs = clusters.flatMap((cluster) => cluster.pagesToMerge.map((pageNumber) => ({ cluster, pageNumber })));
   if (jobs.length === 0) return [];
 
-  const total = jobs.length;
-  const pool = new WorkerPool(pickPoolSize(total));
+  // Resolve BASE_URL against the document: with the relative base ("./") a
+  // raw "./standard_fonts/" would resolve against the page's assets/ path
+  // instead of the app root.
+  const assetBase = new URL(import.meta.env.BASE_URL, document.baseURI).href;
+  const doc = await pdfjsLib.getDocument({
+    data: data.slice(0),
+    isEvalSupported: false,
+    // Required for non-embedded standard fonts and named-CMap CID fonts;
+    // without them those glyphs render as blank boxes.
+    standardFontDataUrl: `${assetBase}standard_fonts/`,
+    cMapUrl: `${assetBase}cmaps/`,
+    cMapPacked: true,
+    // Draw glyphs as outlines from the fetched standard-font programs instead
+    // of relying on the Font Loading API / system fonts. Headless browsers
+    // (and environments without the base-14 fonts) otherwise render
+    // non-embedded fonts (Helvetica, ...) as blank .notdef boxes.
+    disableFontFace: true,
+    useSystemFonts: false,
+  }).promise;
 
+  const overlay = createOverlayWorker();
   try {
-    // Resolve BASE_URL against the document: with the relative base ("./") a
-    // raw "./standard_fonts/" would resolve against the worker's location in
-    // dist/assets/ instead of the app root.
-    const assetBase = new URL(import.meta.env.BASE_URL, document.baseURI).href;
-    const baseConfig = {
-      standardFontDataUrl: `${assetBase}standard_fonts/`,
-      cMapUrl: `${assetBase}cmaps/`,
-    } satisfies Pick<DocumentConfig, "standardFontDataUrl" | "cMapUrl">;
-
-    // Load the PDF once per worker. Each worker receives its own transferred
-    // copy of the bytes and reuses the parsed document for every page it
-    // renders, instead of re-parsing the whole PDF for each page.
-    await Promise.all(
-      pool.workers.map(async (w) => {
-        const req: DocumentConfig = { ...baseConfig, data: data.slice(0) };
-        w.handle = await w.api.loadDocument(Comlink.transfer(req, [req.data]));
-      }),
-    );
-
-    // Dispatch every page render to the least-busy worker, recording each
-    // result against its cluster for the overlay pass.
-    const renderedByCluster = new Map<string, Promise<RenderedPage>[]>();
-    for (const cluster of clusters) renderedByCluster.set(cluster.id, []);
+    const total = jobs.length;
     let done = 0;
+    const grayByCluster = new Map<string, GrayImage[]>();
+    for (const cluster of clusters) grayByCluster.set(cluster.id, []);
 
-    for (const { cluster, pageNumber } of jobs) {
-      const worker = pool.pick();
-      worker.inFlight++;
-      const rendered = worker.api
-        .renderPage(worker.handle!.id, pageNumber)
-        .then((page): RenderedPage => {
-          done += 1;
-          onProgress?.(done, total);
-          return page;
-        })
-        .finally(() => {
-          worker.inFlight--;
-        });
-      renderedByCluster.get(cluster.id)!.push(rendered);
-    }
+    // Render pages with bounded concurrency. pdf.js's worker does the heavy
+    // rasterization; the main thread only drives renders and reads back pixels,
+    // so a few in flight is enough to keep things moving without jank.
+    let cursor = 0;
+    const renderers = Array.from({ length: Math.min(RENDER_CONCURRENCY, jobs.length) }, async () => {
+      while (cursor < jobs.length) {
+        const index = cursor++;
+        const { cluster, pageNumber } = jobs[index]!;
+        const gray = await renderPageToGray(doc, pageNumber);
+        grayByCluster.get(cluster.id)!.push(gray);
+        done += 1;
+        onProgress?.(done, total);
+      }
+    });
+    await Promise.all(renderers);
 
-    // Once a cluster's pages are all rendered, compute its overlay on whichever
-    // worker is free. Tracking in-flight keeps overlay work spread across the
-    // pool too — otherwise every cluster would pile onto worker 0.
+    // Merge each cluster's pages into one preview in the worker (off the main
+    // thread). calculateOverlay is order-independent, so the order pages landed
+    // in the array above doesn't matter.
     const previews = await Promise.all(
       clusters.map(async (cluster): Promise<ClusterPreview> => {
-        const pages = await Promise.all(renderedByCluster.get(cluster.id) ?? []);
-        const worker = pool.pick();
-        worker.inFlight++;
-        try {
-          const result = await worker.api.computeClusterOverlay(cluster.id, pages);
-          if (!result) {
-            return {
-              clusterId: cluster.id,
-              preview: { width: 1, height: 1, data: new Uint8Array([255]) },
-              previewUrl: "",
-            };
-          }
-          return {
-            clusterId: cluster.id,
-            preview: result.preview,
-            previewUrl: grayToDataUrl(result.preview),
-          };
-        } finally {
-          worker.inFlight--;
-        }
+        const images = grayByCluster.get(cluster.id) ?? [];
+        const preview = (await overlay.api.computeClusterOverlay(images)) ?? {
+          width: 1,
+          height: 1,
+          data: new Uint8Array([255]),
+        };
+        return {
+          clusterId: cluster.id,
+          preview,
+          previewUrl: grayToDataUrl(preview),
+        };
       }),
     );
 
     return previews;
   } finally {
-    // Release each worker's parsed document, then tear the pool down.
-    await Promise.all(
-      pool.workers.map(async (w) => {
-        if (!w.handle) return;
-        try {
-          await w.api.unloadDocument(w.handle.id);
-        } catch {
-          // Worker may already be gone; termination below is best-effort.
-        }
-      }),
-    );
-    pool.terminate();
+    overlay.terminate();
+    await doc.destroy();
   }
 }
 

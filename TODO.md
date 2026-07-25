@@ -85,20 +85,24 @@ Manual zoom in/out/reset/fit, plus mouse wheel scrolling/mouse panning.
   missing piece.
 - Standard mouse wheel scrolling/left click panning like in a map.
 
-## Persisted crop settings (export / import)
+## Persisted crop settings (export / import) — ✅ shipped
 
 Save the per-cluster ratios to a JSON file so the same crop can be re-applied to a related PDF later.
 
-- Original: `ExportImportHelper` (entirely commented out — never shipped).
-- Suggested schema (from the architecture plan):
+- Implemented in `src/lib/pdf/cropSettings.ts` (`exportCropSettings` / `importCropSettings` / `serializeCropSettings` /
+  `parseCropSettings`), surfaced as **Export settings** / **Import settings** actions in `CroppingView`.
+- Original: `ExportImportHelper` (entirely commented out — never shipped in Briss; ported fresh here as JSON).
+- Schema:
   ```json
   {
     "excludes": [5, 7, 9],
     "clusters": [{ "even": true, "w": 595, "h": 842, "ratios": [[0.05, 0.05, 0.05, 0.05]] }]
   }
   ```
-- Reconciliation on import: re-run `clusterPages`, match saved clusters to live ones by `(parity, roundedW, roundedH)`,
-  copy ratios over.
+- Reconciliation on import: saved clusters are matched to the live clusters by `(parity, roundedW, roundedH)` (the same
+  key `clusterPages` already uses as the cluster id); ratios are scaled back into pixel rects for each matched cluster's
+  preview. Mismatched entries are skipped safely. `excludes` is persisted for forward compatibility with the
+  exclude-pages feature above but is not yet consumed by `clusterPages`.
 
 ## Outline preservation when page multiplication occurs
 

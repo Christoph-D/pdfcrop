@@ -17,11 +17,16 @@ export default function CroppingView() {
   const zoomIn = useWorkspaceStore((s) => s.zoomIn);
   const zoomOut = useWorkspaceStore((s) => s.zoomOut);
   const fitToWindow = useWorkspaceStore((s) => s.fitToWindow);
+  const exportCropSettings = useWorkspaceStore((s) => s.exportCropSettings);
+  const importCropSettings = useWorkspaceStore((s) => s.importCropSettings);
+  const lastImport = useWorkspaceStore((s) => s.lastImport);
+  const dismissImportNotice = useWorkspaceStore((s) => s.dismissImportNotice);
   const syncSizes = useCropStore((s) => s.syncSizes);
   const setSyncSizes = useCropStore((s) => s.setSyncSizes);
   const propagateSizeFromRect = useCropStore((s) => s.propagateSizeFromRect);
   const { handleFile } = usePdfLoader();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const settingsInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);
   const panRef = useRef<{
@@ -159,6 +164,17 @@ export default function CroppingView() {
           e.target.value = "";
         }}
       />
+      <input
+        type="file"
+        accept="application/json,.json"
+        hidden
+        ref={settingsInputRef}
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) void importCropSettings(f);
+          e.target.value = "";
+        }}
+      />
       {isDragging && (
         <div className="cropping-view__drop-overlay" aria-hidden="true">
           <span className="cropping-view__drop-message">Drop PDF to load</span>
@@ -212,6 +228,22 @@ export default function CroppingView() {
           type="button"
           className="cropping-view__secondary"
           disabled={status === "cropping"}
+          onClick={() => settingsInputRef.current?.click()}
+        >
+          Import settings
+        </button>
+        <button
+          type="button"
+          className="cropping-view__secondary"
+          disabled={status === "cropping"}
+          onClick={() => void exportCropSettings()}
+        >
+          Export settings
+        </button>
+        <button
+          type="button"
+          className="cropping-view__secondary"
+          disabled={status === "cropping"}
           onClick={() => fileInputRef.current?.click()}
         >
           Load new PDF
@@ -230,6 +262,15 @@ export default function CroppingView() {
         <div className="cropping-view__warn">
           Bookmarks were removed because at least one cluster has multiple crop rectangles.{" "}
           <button type="button" onClick={() => setOutlineDismissed(true)}>
+            dismiss
+          </button>
+        </div>
+      )}
+      {lastImport && (
+        <div className="cropping-view__notice">
+          Applied crop settings: {lastImport.matched} cluster{lastImport.matched === 1 ? "" : "s"} matched
+          {lastImport.skipped > 0 ? `, ${lastImport.skipped} skipped` : ""}.{" "}
+          <button type="button" onClick={() => dismissImportNotice()}>
             dismiss
           </button>
         </div>

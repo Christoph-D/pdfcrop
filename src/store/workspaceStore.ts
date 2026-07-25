@@ -1,10 +1,18 @@
 import { create } from "zustand";
 import type { Cluster } from "@/lib/pdf/cluster";
 import type { ClusterPreview } from "@/lib/pdf/render";
+import {
+  cropSettingsFileName,
+  exportCropSettings,
+  importCropSettings,
+  parseCropSettings,
+  serializeCropSettings,
+} from "@/lib/pdf/cropSettings";
+import { saveFile } from "@/lib/download";
 import { cropPdf, croppedFileName, type CropOutput } from "@/lib/pdf/write";
 import type { PdfSource } from "@/lib/pdf/types";
 import { clamp } from "@/lib/pdf/ratios";
-import { useCropStore } from "./cropStore";
+import { newRectId, useCropStore } from "./cropStore";
 
 export type WorkspaceStatus = "idle" | "clustering" | "rendering" | "ready" | "cropping" | "error";
 
@@ -28,6 +36,7 @@ interface WorkspaceState {
   lastCrop: (CropOutput & { fileName: string }) | null;
   /** Manual zoom factor. 1 = auto-fit; multiplied onto each panel's fit width. */
   zoom: number;
+  lastImport: { matched: number; skipped: number } | null;
   setSource: (source: PdfSource) => void;
   setClusters: (clusters: Cluster[]) => void;
   setPreviews: (previews: ClusterPreview[]) => void;
@@ -41,6 +50,9 @@ interface WorkspaceState {
   resetZoom: () => void;
   fitToWindow: () => void;
   cropAndSave: () => Promise<void>;
+  exportCropSettings: () => Promise<void>;
+  importCropSettings: (file: File) => Promise<void>;
+  dismissImportNotice: () => void;
   reset: () => void;
 }
 
@@ -54,10 +66,12 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   error: null,
   lastCrop: null,
   zoom: 1,
+  lastImport: null,
   setSource: (source) => {
     useCropStore.getState().clearAll();
-    // A new document resets zoom to its auto-fit baseline.
-    set({ source, status: "clustering", error: null, zoom: 1 });
+    // A new document resets zoom to its auto-fit baseline and clears any
+    // stale import notice.
+    set({ source, status: "clustering", error: null, zoom: 1, lastImport: null });
   },
   setClusters: (clusters) => set({ clusters }),
   setPreviews: (previews) => set({ previews, status: "ready" }),
@@ -87,7 +101,12 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         })),
       });
       const fileName = croppedFileName(state.source.fileName);
-      await triggerDownload(output.bytes, fileName);
+      await saveFile(output.bytes, {
+        suggestedName: fileName,
+        mimeType: "application/pdf",
+        extension: ".pdf",
+        description: "PDF",
+      });
       set({ status: "ready", lastCrop: { ...output, fileName } });
     } catch (err) {
       set({
@@ -96,6 +115,56 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       });
     }
   },
+  exportCropSettings: async () => {
+    const state = get();
+    if (!state.source) return;
+    try {
+      const cropStore = useCropStore.getState();
+      const settings = exportCropSettings({
+        clusters: state.clusters,
+        rectsByCluster: cropStore.rectsByCluster,
+        previews: state.previews.map((p) => ({ clusterId: p.clusterId, preview: p.preview })),
+      });
+      const text = serializeCropSettings(settings);
+      const bytes = new TextEncoder().encode(text);
+      await saveFile(bytes, {
+        suggestedName: cropSettingsFileName(state.source.fileName),
+        mimeType: "application/json",
+        extension: ".json",
+        description: "Crop settings",
+      });
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : String(err) });
+    }
+  },
+  importCropSettings: async (file) => {
+    const state = get();
+    if (!state.source) return;
+    try {
+      const text = await file.text();
+      const settings = parseCropSettings(text);
+      const result = importCropSettings(
+        settings,
+        state.clusters,
+        state.previews.map((p) => ({ clusterId: p.clusterId, preview: p.preview })),
+        newRectId,
+      );
+      const cropStore = useCropStore.getState();
+      // Replace the rects of every matched cluster; leave unmatched clusters
+      // untouched. Imported rects carry fresh ids, so drop any stale selection.
+      for (const [clusterId, rects] of Object.entries(result.rectsByCluster)) {
+        cropStore.setRects(clusterId, rects);
+      }
+      cropStore.clearSelection();
+      set({
+        error: null,
+        lastImport: { matched: result.matched, skipped: result.skipped },
+      });
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : String(err) });
+    }
+  },
+  dismissImportNotice: () => set({ lastImport: null }),
   reset: () =>
     set({
       status: "idle",
@@ -107,55 +176,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       error: null,
       lastCrop: null,
       zoom: 1,
+      lastImport: null,
     }),
 }));
-
-async function triggerDownload(bytes: Uint8Array, fileName: string): Promise<void> {
-  // Copy into a fresh ArrayBuffer so DOM type-checkers are happy with Blob /
-  // BufferSource (Uint8Array<ArrayBufferLike> may also wrap SharedArrayBuffer).
-  const buffer = new ArrayBuffer(bytes.byteLength);
-  new Uint8Array(buffer).set(bytes);
-  // Try the File System Access API save picker first, fall back to a download.
-  const w = window as unknown as {
-    showSaveFilePicker?: (opts: {
-      suggestedName?: string;
-      types?: Array<{ description?: string; accept: Record<string, string[]> }>;
-    }) => Promise<{
-      createWritable: () => Promise<{
-        write: (data: BufferSource) => Promise<void>;
-        close: () => Promise<void>;
-      }>;
-    }>;
-  };
-  if (typeof w.showSaveFilePicker === "function") {
-    try {
-      const handle = await w.showSaveFilePicker({
-        suggestedName: fileName,
-        types: [
-          {
-            description: "PDF",
-            accept: { "application/pdf": [".pdf"] },
-          },
-        ],
-      });
-      const writable = await handle.createWritable();
-      await writable.write(buffer);
-      await writable.close();
-      return;
-    } catch (err) {
-      if (err instanceof DOMException && (err.name === "AbortError" || err.name === "NotAllowedError")) {
-        return; // user cancelled
-      }
-      // fall through to download
-    }
-  }
-  const blob = new Blob([buffer], { type: "application/pdf" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = fileName;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}

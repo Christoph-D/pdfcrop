@@ -104,7 +104,6 @@
   border-radius: 6px;
   cursor: pointer;
   font-size: 14px;
-  margin-right: 80px;
 }
 
 .cropping-view__secondary:hover:not(:disabled) {
@@ -127,7 +126,8 @@
 }
 
 .cropping-view__warn,
-.cropping-view__error {
+.cropping-view__error,
+.cropping-view__notice {
   margin: 12px 20px 0;
   padding: 10px 14px;
   border-radius: 6px;
@@ -139,15 +139,28 @@
   color: #ffd6a8;
 }
 
-.cropping-view__warn button {
+.cropping-view__notice {
+  background: #1f3a4a;
+  color: #c8e6ff;
+}
+
+.cropping-view__warn button,
+.cropping-view__notice button {
   background: transparent;
-  border: 1px solid #ffd6a8;
-  color: #ffd6a8;
+  border: 1px solid currentColor;
   padding: 2px 8px;
   margin-left: 8px;
   border-radius: 3px;
   cursor: pointer;
   font-size: 11px;
+}
+
+.cropping-view__warn button {
+  color: #ffd6a8;
+}
+
+.cropping-view__notice button {
+  color: #c8e6ff;
 }
 
 .cropping-view__error {

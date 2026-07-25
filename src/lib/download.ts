@@ -1,0 +1,64 @@
+export interface SaveFileOptions {
+  suggestedName: string;
+  mimeType: string;
+  extension: string;
+  description: string;
+}
+
+/**
+ * Save a byte buffer to disk. Prefers the File System Access API save picker
+ * when available, and falls back to an `<a download>` click otherwise (the
+ * path used by Firefox/Safari and by automated tests).
+ *
+ * A user-initiated picker cancellation (AbortError / NotAllowedError) resolves
+ * silently rather than throwing.
+ */
+export async function saveFile(data: Uint8Array, opts: SaveFileOptions): Promise<void> {
+  // Copy into a fresh ArrayBuffer so DOM type-checkers are happy with Blob /
+  // BufferSource (Uint8Array<ArrayBufferLike> may also wrap SharedArrayBuffer).
+  const buffer = new ArrayBuffer(data.byteLength);
+  new Uint8Array(buffer).set(data);
+  // Try the File System Access API save picker first, fall back to a download.
+  const w = window as unknown as {
+    showSaveFilePicker?: (o: {
+      suggestedName?: string;
+      types?: Array<{ description?: string; accept: Record<string, string[]> }>;
+    }) => Promise<{
+      createWritable: () => Promise<{
+        write: (data: BufferSource) => Promise<void>;
+        close: () => Promise<void>;
+      }>;
+    }>;
+  };
+  if (typeof w.showSaveFilePicker === "function") {
+    try {
+      const handle = await w.showSaveFilePicker({
+        suggestedName: opts.suggestedName,
+        types: [
+          {
+            description: opts.description,
+            accept: { [opts.mimeType]: [opts.extension] },
+          },
+        ],
+      });
+      const writable = await handle.createWritable();
+      await writable.write(buffer);
+      await writable.close();
+      return;
+    } catch (err) {
+      if (err instanceof DOMException && (err.name === "AbortError" || err.name === "NotAllowedError")) {
+        return; // user cancelled
+      }
+      // fall through to download
+    }
+  }
+  const blob = new Blob([buffer], { type: opts.mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = opts.suggestedName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}

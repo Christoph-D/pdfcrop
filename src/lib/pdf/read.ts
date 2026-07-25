@@ -45,24 +45,28 @@ export async function loadPdf(data: ArrayBuffer, fileName: string): Promise<PdfS
     throw err;
   }
 
-  const pages: PageMetadata[] = [];
-  for (let i = 1; i <= doc.numPages; i++) {
-    const page = await doc.getPage(i);
-    const viewport = page.getViewport({ scale: 1 });
-    pages.push({
-      pageNumber: i,
-      width: viewport.width,
-      height: viewport.height,
-      rotation: normalizeRotation(page.rotate),
-    });
-    page.cleanup();
-  }
+  try {
+    const pages: PageMetadata[] = [];
+    for (let i = 1; i <= doc.numPages; i++) {
+      const page = await doc.getPage(i);
+      const viewport = page.getViewport({ scale: 1 });
+      pages.push({
+        pageNumber: i,
+        width: viewport.width,
+        height: viewport.height,
+        rotation: normalizeRotation(page.rotate),
+      });
+      page.cleanup();
+    }
 
-  return {
-    data,
-    fileName,
-    pages,
-  };
+    return {
+      data,
+      fileName,
+      pages,
+    };
+  } finally {
+    await doc.destroy();
+  }
 }
 
 export type { pdfjsLib };

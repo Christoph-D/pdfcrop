@@ -52,13 +52,18 @@ In-memory clipboard (NOT the OS clipboard) for moving rect layouts between clust
 - To port: add `clipboard: CropRect[]` to `cropStore` plus `copy()`/`paste()` actions; bind Ctrl/Cmd+C and Ctrl/Cmd+v at
   the panel level (intercept before the browser's real clipboard).
 
-## Align selected rectangles
+## Align selected rectangles — ✅ done
 
 Sets every selected rect in every panel to the same x/y/w/h as a reference.
 
-- Original: `BrissGUIApp.alignSelRects(x, y, w, h)` invoked from the context-menu handler with the topmost rect under
-  the cursor.
-- Depends on cross-panel broadcast (above) to be meaningful.
+- Implemented as the `alignSelectedRects` action in `cropStore` and surfaced as an **Align selected** item in the
+  `ClusterPanel` context menu.
+- Original: `BrissGUIApp.alignSelRects(x, y, w, h)` invoked from the context-menu handler (`MergedPanel.alignSelected`)
+  with the topmost rect under the cursor.
+- The reference is the rect under the cursor (the menu's anchor); every selected rect across all clusters snaps to its
+  `x/y/w/h`, each clamped into its own cluster's image bounds so a differing-size cluster can't push a rect off its
+  preview. Right-clicking preserves the current selection when the anchor rect is already selected (so the whole
+  multi-select group aligns).
 
 ## Exclude pages
 

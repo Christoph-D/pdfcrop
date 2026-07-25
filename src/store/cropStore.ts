@@ -97,6 +97,14 @@ interface CropState {
     dimsByCluster: Record<string, ClusterDims>,
     anchor: SizeAnchor,
   ) => void;
+  /**
+   * Snap every selected rect (across all clusters) to a reference rect's
+   * x/y/w/h. Mirrors Briss's `BrissGUIApp.alignSelRects`: the context menu
+   * passes the rect under the cursor and every selected rect is moved and
+   * resized to match it. Each rect is clamped into its own cluster's image
+   * bounds so a differing-size cluster can't push a rect off its preview.
+   */
+  alignSelectedRects: (reference: PixelRect, dimsByCluster: Record<string, ClusterDims>) => void;
 }
 
 let nextId = 1;
@@ -310,5 +318,28 @@ export const useCropStore = create<CropState>((set) => ({
         });
       }
       return { rectsByCluster: newRectsByCluster };
+    }),
+  alignSelectedRects: (reference, dimsByCluster) =>
+    set((s) => {
+      if (s.selectedRectIds.size === 0) return {};
+      const { x: rx, y: ry, w: rw, h: rh } = reference;
+      let changed = false;
+      const rectsByCluster: ClusterCrops = {};
+      for (const [cid, list] of Object.entries(s.rectsByCluster)) {
+        if (!list.some((r) => s.selectedRectIds.has(r.id))) {
+          rectsByCluster[cid] = list;
+          continue;
+        }
+        const dims = dimsByCluster[cid];
+        const imgW = dims?.imgW ?? Number.POSITIVE_INFINITY;
+        const imgH = dims?.imgH ?? Number.POSITIVE_INFINITY;
+        const w = clamp(rw, 1, imgW);
+        const h = clamp(rh, 1, imgH);
+        const x = clamp(rx, 0, Math.max(0, imgW - w));
+        const y = clamp(ry, 0, Math.max(0, imgH - h));
+        changed = true;
+        rectsByCluster[cid] = list.map((r) => (s.selectedRectIds.has(r.id) ? { ...r, x, y, w, h } : r));
+      }
+      return changed ? { rectsByCluster } : {};
     }),
 }));

@@ -168,6 +168,7 @@ export default function ClusterPanel({ cluster, preview, previewUrl }: Props) {
   const paste = useCropStore((s) => s.paste);
   const replaceRect = useCropStore((s) => s.replaceRect);
   const propagateSizeFromRect = useCropStore((s) => s.propagateSizeFromRect);
+  const alignSelectedRects = useCropStore((s) => s.alignSelectedRects);
 
   const svgRef = useRef<SVGSVGElement>(null);
   const dragState = useRef<{
@@ -476,7 +477,11 @@ export default function ClusterPanel({ cluster, preview, previewUrl }: Props) {
     return () => window.removeEventListener("keydown", onKey);
   }, [applyDeltaToSelection, clearSelection, cluster.id, copy, menu, paste, removeSelectedRects]);
 
-  // Right-click on a rect: select it and offer the split actions.
+  // Right-click on a rect: open the context menu. If the rect under the
+  // cursor isn't already part of the selection, replace the selection with it
+  // (so single-right-click behaves like a single left-click); otherwise keep
+  // the existing group so "Align selected" can snap the whole set to the
+  // reference (mirrors Briss's showPopUpMenu, which never changes selection).
   const onContextMenu = useCallback(
     (e: React.MouseEvent<SVGSVGElement>) => {
       const { x, y } = toImageCoords(e.clientX, e.clientY);
@@ -484,14 +489,14 @@ export default function ClusterPanel({ cluster, preview, previewUrl }: Props) {
         const r = rects[i]!;
         if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) {
           e.preventDefault();
-          selectOnly(r.id);
+          if (!selectedRectIds.has(r.id)) selectOnly(r.id);
           setMenu({ rectId: r.id, x: e.clientX, y: e.clientY });
           return;
         }
       }
       setMenu(null);
     },
-    [rects, selectOnly, toImageCoords],
+    [rects, selectOnly, selectedRectIds, toImageCoords],
   );
 
   const splitSelected = useCallback(
@@ -509,6 +514,18 @@ export default function ClusterPanel({ cluster, preview, previewUrl }: Props) {
     },
     [cluster.id, menu, preview, replaceRect],
   );
+
+  // Port of Briss's MergedPanel.alignSelected / BrissGUIApp.alignSelRects:
+  // the rect under the cursor (the one the menu opened on) is the reference,
+  // and every selected rect across all clusters snaps to its x/y/w/h.
+  const alignSelected = useCallback(() => {
+    const rectId = menu?.rectId;
+    setMenu(null);
+    if (!rectId) return;
+    const rect = useCropStore.getState().rectsByCluster[cluster.id]?.find((r) => r.id === rectId);
+    if (!rect) return;
+    alignSelectedRects({ x: rect.x, y: rect.y, w: rect.w, h: rect.h }, buildDimsByCluster());
+  }, [alignSelectedRects, cluster.id, menu]);
 
   const cursor = cursorFor(hoverHandle);
 
@@ -630,6 +647,9 @@ export default function ClusterPanel({ cluster, preview, previewUrl }: Props) {
             </button>
             <button type="button" role="menuitem" onClick={() => splitSelected("row")}>
               Split row
+            </button>
+            <button type="button" role="menuitem" onClick={alignSelected}>
+              Align selected
             </button>
           </div>
         </>

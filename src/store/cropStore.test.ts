@@ -214,6 +214,61 @@ describe("applyDeltaToSelection", () => {
   });
 });
 
+describe("alignSelectedRects", () => {
+  const dims = {
+    [A]: { imgW: 200, imgH: 200 },
+    [B]: { imgW: 400, imgH: 400 },
+  };
+
+  it("snaps every selected rect to the reference x/y/w/h", () => {
+    const { toggleSelect, alignSelectedRects } = useCropStore.getState();
+    toggleSelect("a2");
+    toggleSelect("b1");
+    // a1 is the reference (under the cursor) but not selected — stays put.
+    alignSelectedRects({ x: 10, y: 10, w: 40, h: 60 }, dims);
+
+    const s = useCropStore.getState();
+    expect(s.rectsByCluster[A]!.find((r) => r.id === "a1")).toEqual(rect("a1", 10, 10, 40, 60));
+    expect(s.rectsByCluster[A]!.find((r) => r.id === "a2")).toEqual(rect("a2", 10, 10, 40, 60));
+    expect(s.rectsByCluster[B]!.find((r) => r.id === "b1")).toEqual(rect("b1", 10, 10, 40, 60));
+    // Selection is preserved.
+    expect([...s.selectedRectIds].sort()).toEqual(["a2", "b1"]);
+  });
+
+  it("also snaps the reference rect when it is itself selected", () => {
+    const { toggleSelect, alignSelectedRects } = useCropStore.getState();
+    toggleSelect("a1");
+    toggleSelect("b1");
+    alignSelectedRects({ x: 10, y: 10, w: 40, h: 60 }, dims);
+
+    const s = useCropStore.getState();
+    expect(s.rectsByCluster[A]!.find((r) => r.id === "a1")).toEqual(rect("a1", 10, 10, 40, 60));
+    expect(s.rectsByCluster[B]!.find((r) => r.id === "b1")).toEqual(rect("b1", 10, 10, 40, 60));
+  });
+
+  it("clamps each rect into its own cluster image bounds", () => {
+    const { toggleSelect, alignSelectedRects } = useCropStore.getState();
+    toggleSelect("a2");
+    toggleSelect("b1");
+    // Reference is larger than cluster A's 200x200 image and starts past both
+    // clusters' bottom-right corners (300+150=450), so both must clamp while
+    // B (400x400) keeps more room than A.
+    alignSelectedRects({ x: 300, y: 300, w: 150, h: 150 }, dims);
+
+    const s = useCropStore.getState();
+    // a2: clamped to a 200x200 image -> x=200-150=50, y=50, w=150, h=150.
+    expect(s.rectsByCluster[A]!.find((r) => r.id === "a2")).toEqual(rect("a2", 50, 50, 150, 150));
+    // b1: 300+150=450 > 400, so it also clamps -> x=400-150=250, y=250.
+    expect(s.rectsByCluster[B]!.find((r) => r.id === "b1")).toEqual(rect("b1", 250, 250, 150, 150));
+  });
+
+  it("is a no-op when nothing is selected", () => {
+    const before = useCropStore.getState().rectsByCluster;
+    useCropStore.getState().alignSelectedRects({ x: 1, y: 2, w: 3, h: 4 }, dims);
+    expect(useCropStore.getState().rectsByCluster).toBe(before);
+  });
+});
+
 describe("cropStore copy/paste", () => {
   beforeEach(() => {
     useCropStore.getState().clearAll();

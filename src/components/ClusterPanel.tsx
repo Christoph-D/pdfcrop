@@ -147,6 +147,39 @@ function buildDimsByCluster(): Record<string, { imgW: number; imgH: number }> {
   return dimsByCluster;
 }
 
+/**
+ * Target on-screen height of the dimension annotation, in CSS pixels. It is a
+ * constant: zoom and the crop rect's actual size never enlarge it — only the
+ * available space can shrink it.
+ */
+const ANNOTATION_FONT_PX = 13;
+/** Floor so the label stays legible even on a too-small rect. */
+const MIN_ANNOTATION_FONT_PX = 8;
+/** Conservative average glyph advance, relative to the font size. */
+const ANNOTATION_GLYPH_ADVANCE = 0.6;
+/** Padding reserved inside the rect before measuring available space. */
+const ANNOTATION_PADDING_PX = 8;
+
+/**
+ * Font size (in viewBox units) for the dimension annotation on a selected
+ * crop rect, chosen so it renders at a fixed on-screen size that is
+ * independent of zoom and of the crop rect's actual size. `scale` is the
+ * number of CSS pixels per viewBox unit (rendered SVG width ÷ preview
+ * width): converting a target screen size back into viewBox units through it
+ * is what cancels out zoom. The label only shrinks — in screen pixels — when
+ * the rect's *visible* size is too small to hold it (so it stops overflowing
+ * the rect); it never grows with zoom or the actual size.
+ */
+function annotationFontSize(rect: PixelRect, label: string, scale: number): number {
+  if (scale <= 0) return Math.min(ANNOTATION_FONT_PX, Math.max(MIN_ANNOTATION_FONT_PX, rect.h / 10));
+  const labelWidthPx = Math.max(1, label.length) * ANNOTATION_GLYPH_ADVANCE * ANNOTATION_FONT_PX;
+  const availWidthPx = Math.max(0, rect.w * scale - ANNOTATION_PADDING_PX);
+  const availHeightPx = Math.max(0, rect.h * scale - ANNOTATION_PADDING_PX);
+  const fit = Math.min(availWidthPx / labelWidthPx, availHeightPx / ANNOTATION_FONT_PX);
+  const px = Math.max(MIN_ANNOTATION_FONT_PX, ANNOTATION_FONT_PX * Math.min(1, fit));
+  return px / scale;
+}
+
 export default function ClusterPanel({ cluster, preview, previewUrl }: Props) {
   const imgW = preview.width;
   const imgH = preview.height;
@@ -181,6 +214,25 @@ export default function ClusterPanel({ cluster, preview, previewUrl }: Props) {
   } | null>(null);
   const [hoverHandle, setHoverHandle] = useState<Handle | null>(null);
   const [menu, setMenu] = useState<{ rectId: string; x: number; y: number } | null>(null);
+  // Rendered SVG width in CSS pixels, so annotations can be sized in screen
+  // space rather than in (zoom-scaled) viewBox units. The dimension label
+  // converts its desired on-screen height back into viewBox units through the
+  // ratio width ÷ imgW, which is what makes its rendered size independent of
+  // zoom and of the crop rect's actual size.
+  const [screenScale, setScreenScale] = useState(0);
+
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    const update = () => {
+      const w = svg.getBoundingClientRect().width;
+      if (w > 0) setScreenScale(w / imgW);
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(svg);
+    return () => ro.disconnect();
+  }, [imgW]);
 
   // Seed an auto-crop rectangle on first mount.
   useEffect(() => {
@@ -560,11 +612,13 @@ export default function ClusterPanel({ cluster, preview, previewUrl }: Props) {
           const fill = tooSmall ? "rgba(220, 50, 50, 0.25)" : "rgba(60, 130, 220, 0.25)";
           const stroke = selected ? "#000" : "rgba(60,130,220,0.9)";
           // Lower-left dimension/aspect annotation. Computed up front so the
-          // translucent background can be sized to cover the glyphs.
+          // translucent background can be sized to cover the glyphs. Font size
+          // is fixed on-screen (independent of zoom / actual rect size).
           const sizeLabel = selected ? formatCropSizeLabel(r) : "";
-          const sizeLabelFontSize = Math.min(12, Math.max(8, r.h / 10));
+          const sizeLabelFontSize = annotationFontSize(r, sizeLabel, screenScale);
           // Approximate sans-serif advance so the background covers the text.
-          const sizeLabelWidth = sizeLabel.length * sizeLabelFontSize * 0.6 + 4;
+          const sizeLabelWidth = sizeLabel.length * sizeLabelFontSize * ANNOTATION_GLYPH_ADVANCE + 4;
+
           return (
             <g key={r.id}>
               <rect

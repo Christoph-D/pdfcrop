@@ -31,16 +31,17 @@ Briss's defining UX: dragging/resizing/moving a selected crop rectangle applies 
 | `Ctrl/Cmd+C` / `V`   | —                | Copy/paste rects between clusters (see below)           | ″                                |
 | `L`                  | —                | Trigger load-file picker                                | `BrissSwingGUI` menu accelerator |
 
-## Split into columns / rows
+## Split into columns / rows — ✅ done
 
 Right-click context menu on a selected rect: replace it with two crops by finding the minimum-content-variance seam near
-the horizontal/vertical middle.
+the horizontal/vertical middle. Implemented in `src/lib/pdf/split.ts` and surfaced as a context menu in `ClusterPanel`.
 
 - Original: `SplitFinder.splitColumn` / `splitRow`, exposed via `PopUpMenuForCropRectangles` in `MergedPanel`.
 - Algorithm port: 1-D argmin of `sdOfDerivation` over the middle ±5% window. Row split introduces a
   `ROW_OVERLAP_RATIO = 0.01` overlap so the two halves share a sliver (prevents clipping ascenders/descenders).
 - Constants: `LOOK_RATIO = 0.5`, `MAX_DIST_RATIO = 0.1`.
-- To port: add `split.ts`, surface as a context-menu action in `ClusterPanel`.
+- Note: unlike Briss (which computed the seam over the whole merged preview and carried a TODO to scope it to the crop),
+  the projection here runs only over the rect's pixels, so the seam is found near the _rect's_ middle.
 
 ## Copy / paste crop rectangles
 

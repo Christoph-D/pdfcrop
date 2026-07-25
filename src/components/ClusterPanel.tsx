@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from "re
 import type { Cluster } from "@/lib/pdf/cluster";
 import type { GrayImage } from "@/lib/pdf/overlay";
 import { getAutoCropRatios } from "@/lib/pdf/autocrop";
+import { splitColumn, splitRow } from "@/lib/pdf/split";
 import {
   CORNER_DIMENSION,
   EDGE_THRESHOLD,
@@ -163,6 +164,7 @@ export default function ClusterPanel({ cluster, preview, previewUrl }: Props) {
   const setActiveCluster = useCropStore((s) => s.setActiveCluster);
   const copy = useCropStore((s) => s.copy);
   const paste = useCropStore((s) => s.paste);
+  const replaceRect = useCropStore((s) => s.replaceRect);
   const propagateSizeFromRect = useCropStore((s) => s.propagateSizeFromRect);
 
   const svgRef = useRef<SVGSVGElement>(null);
@@ -175,6 +177,7 @@ export default function ClusterPanel({ cluster, preview, previewUrl }: Props) {
     origins: Record<string, PixelRect>;
   } | null>(null);
   const [hoverHandle, setHoverHandle] = useState<Handle | null>(null);
+  const [menu, setMenu] = useState<{ rectId: string; x: number; y: number } | null>(null);
 
   // Seed an auto-crop rectangle on first mount.
   useEffect(() => {
@@ -207,6 +210,9 @@ export default function ClusterPanel({ cluster, preview, previewUrl }: Props) {
 
   const onPointerDown = useCallback(
     (e: React.PointerEvent<SVGSVGElement>) => {
+      // Only the primary button draws / drags; let right-click reach
+      // `onContextMenu` so the split menu can open.
+      if (e.button !== 0) return;
       e.preventDefault();
       svgRef.current?.setPointerCapture(e.pointerId);
       // This panel is now the paste target.
@@ -405,8 +411,9 @@ export default function ClusterPanel({ cluster, preview, previewUrl }: Props) {
   );
 
   // Keyboard shortcuts: Delete/Esc operate over the whole global selection,
-  // and Ctrl/Cmd+C / Ctrl/Cmd+V copy/paste crop-rect layouts in memory. Every
-  // ClusterPanel registers this listener; the store actions are idempotent
+  // Escape also closes an open split context menu, and Ctrl/Cmd+C /
+  // Ctrl/Cmd+V copy/paste crop-rect layouts in memory. Every ClusterPanel
+  // registers this listener; the store actions are idempotent
   // (removeSelectedRects clears the set, copy/paste are gated to the active
   // cluster) so duplicate firings are no-ops.
   useEffect(() => {
@@ -414,12 +421,16 @@ export default function ClusterPanel({ cluster, preview, previewUrl }: Props) {
       const key = e.key.toLowerCase();
       const isCopyPaste = (key === "c" || key === "v") && (e.ctrlKey || e.metaKey);
       if (e.key !== "Delete" && e.key !== "Backspace" && e.key !== "Escape" && !isCopyPaste) return;
-      // Copy/paste only act in the active cluster so they fire once.
-      if (isCopyPaste && useCropStore.getState().activeClusterId !== cluster.id) return;
       if (e.key === "Escape") {
+        if (menu) {
+          setMenu(null);
+          return;
+        }
         clearSelection();
         return;
       }
+      // Copy/paste only act in the active cluster so they fire once.
+      if (isCopyPaste && useCropStore.getState().activeClusterId !== cluster.id) return;
       e.preventDefault();
       if (isCopyPaste) {
         if (key === "c") copy();
@@ -432,7 +443,41 @@ export default function ClusterPanel({ cluster, preview, previewUrl }: Props) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [clearSelection, cluster.id, copy, paste, removeSelectedRects]);
+  }, [clearSelection, cluster.id, copy, menu, paste, removeSelectedRects]);
+
+  // Right-click on a rect: select it and offer the split actions.
+  const onContextMenu = useCallback(
+    (e: React.MouseEvent<SVGSVGElement>) => {
+      const { x, y } = toImageCoords(e.clientX, e.clientY);
+      for (let i = rects.length - 1; i >= 0; i--) {
+        const r = rects[i]!;
+        if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) {
+          e.preventDefault();
+          selectOnly(r.id);
+          setMenu({ rectId: r.id, x: e.clientX, y: e.clientY });
+          return;
+        }
+      }
+      setMenu(null);
+    },
+    [rects, selectOnly, toImageCoords],
+  );
+
+  const splitSelected = useCallback(
+    (axis: "column" | "row") => {
+      const rectId = menu?.rectId;
+      setMenu(null);
+      if (!rectId) return;
+      const rect = useCropStore.getState().rectsByCluster[cluster.id]?.find((r) => r.id === rectId);
+      if (!rect) return;
+      const [a, b] = axis === "column" ? splitColumn(preview, rect) : splitRow(preview, rect);
+      replaceRect(cluster.id, rectId, [
+        { id: newRectId(), ...a },
+        { id: newRectId(), ...b },
+      ]);
+    },
+    [cluster.id, menu, preview, replaceRect],
+  );
 
   const cursor = cursorFor(hoverHandle);
 
@@ -457,6 +502,7 @@ export default function ClusterPanel({ cluster, preview, previewUrl }: Props) {
         onPointerMove={onPointerMove}
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
+        onContextMenu={onContextMenu}
       >
         <image href={previewUrl} x={0} y={0} width={imgW} height={imgH} />
         {rects.map((r, idx) => {
@@ -517,6 +563,26 @@ export default function ClusterPanel({ cluster, preview, previewUrl }: Props) {
         {" · "}
         {cluster.width.toFixed(0)} × {cluster.height.toFixed(0)}
       </div>
+      {menu && (
+        <>
+          <div
+            className="cluster-panel__menu-backdrop"
+            onClick={() => setMenu(null)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setMenu(null);
+            }}
+          />
+          <div className="cluster-panel__menu" role="menu" style={{ left: menu.x, top: menu.y }}>
+            <button type="button" role="menuitem" onClick={() => splitSelected("column")}>
+              Split column
+            </button>
+            <button type="button" role="menuitem" onClick={() => splitSelected("row")}>
+              Split row
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }

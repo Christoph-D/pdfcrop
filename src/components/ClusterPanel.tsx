@@ -558,13 +558,13 @@ export default function ClusterPanel({ cluster, preview, previewUrl }: Props) {
       if (!rectId) return;
       const rect = useCropStore.getState().rectsByCluster[cluster.id]?.find((r) => r.id === rectId);
       if (!rect) return;
-      const [a, b] = axis === "column" ? splitColumn(preview, rect) : splitRow(preview, rect);
+      const [a, b] = axis === "column" ? splitColumn(rect) : splitRow(rect);
       replaceRect(cluster.id, rectId, [
         { id: newRectId(), ...a },
         { id: newRectId(), ...b },
       ]);
     },
-    [cluster.id, menu, preview, replaceRect],
+    [cluster.id, menu, replaceRect],
   );
 
   // Port of Briss's MergedPanel.alignSelected / BrissGUIApp.alignSelRects:

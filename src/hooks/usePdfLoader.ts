@@ -19,6 +19,7 @@ export function usePdfLoader(): UsePdfLoaderResult {
         setError("Please choose a .pdf file.");
         return;
       }
+      useWorkspaceStore.setState({ loadStartedAt: performance.now() });
       setIsLoading(true);
       try {
         const buf = await file.arrayBuffer();

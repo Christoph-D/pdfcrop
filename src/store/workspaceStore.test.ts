@@ -124,3 +124,26 @@ describe("crop cache invalidation from cropStore", () => {
     expect(useWorkspaceStore.getState().croppedCache).not.toBeNull();
   });
 });
+
+describe("preview timing", () => {
+  it("logs elapsed ms from load start to setPreviews and clears the timer", () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    useWorkspaceStore.setState({ loadStartedAt: performance.now() });
+
+    useWorkspaceStore.getState().setPreviews([]);
+
+    expect(logSpy).toHaveBeenCalledTimes(1);
+    expect(logSpy.mock.calls[0]![0]).toMatch(/preview ready in \d+ ms/);
+    expect(useWorkspaceStore.getState().loadStartedAt).toBeNull();
+    logSpy.mockRestore();
+  });
+
+  it("does not log when no load was started (e.g. a re-cluster)", () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    useWorkspaceStore.getState().setPreviews([]);
+
+    expect(logSpy).not.toHaveBeenCalled();
+    logSpy.mockRestore();
+  });
+});

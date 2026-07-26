@@ -42,6 +42,7 @@ interface WorkspaceState {
   progressDone: number;
   progressTotal: number;
   error: string | null;
+  loadStartedAt: number | null;
   lastCrop: (CropOutput & { fileName: string }) | null;
   /**
    * Cached cropped bytes shared by the Preview and Download buttons. Reused
@@ -89,6 +90,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   progressDone: 0,
   progressTotal: 0,
   error: null,
+  loadStartedAt: null,
   lastCrop: null,
   croppedCache: null,
   zoom: 1,
@@ -111,7 +113,15 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     });
   },
   setClusters: (clusters) => set({ clusters }),
-  setPreviews: (previews) => set({ previews, status: "ready", isReclustering: false }),
+  setPreviews: (previews) => {
+    const start = get().loadStartedAt;
+    if (start !== null) {
+      const elapsed = Math.round(performance.now() - start);
+      const name = get().source?.fileName ?? "(unknown)";
+      console.log(`[pdfcrop] "${name}" preview ready in ${elapsed} ms`);
+    }
+    set({ previews, status: "ready", isReclustering: false, loadStartedAt: null });
+  },
   setStatus: (status) => set({ status }),
   setProgress: (progressDone, progressTotal) => set({ progressDone, progressTotal }),
   setError: (error) => set({ error, status: "error" }),
@@ -250,6 +260,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       progressDone: 0,
       progressTotal: 0,
       error: null,
+      loadStartedAt: null,
       lastCrop: null,
       zoom: 1,
       lastImport: null,

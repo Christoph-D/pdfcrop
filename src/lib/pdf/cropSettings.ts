@@ -158,7 +158,7 @@ export function parseCropSettings(text: string): CropSettings {
   try {
     raw = JSON.parse(text);
   } catch (err) {
-    throw new Error(`Invalid crop settings JSON: ${err instanceof Error ? err.message : String(err)}`);
+    throw new Error(`Invalid crop settings JSON: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
   }
   return normalizeSettings(raw);
 }

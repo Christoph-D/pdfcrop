@@ -1,4 +1,5 @@
 dist/
 .*
-package-lock.yaml
+package-lock.json
+pnpm-lock.yaml
 tsconfig.tsbuildinfo

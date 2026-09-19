@@ -41,7 +41,7 @@ async function renderPageToGray(doc: pdfjsLib.PDFDocumentProxy, pageNumber: numb
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, width, height);
   await page.render({
-    canvasContext: ctx,
+    canvas,
     viewport,
     background: "white",
   }).promise;
@@ -76,9 +76,8 @@ export async function renderClusterPreviews(
   // raw "./standard_fonts/" would resolve against the page's assets/ path
   // instead of the app root.
   const assetBase = new URL(import.meta.env.BASE_URL, document.baseURI).href;
-  const doc = await pdfjsLib.getDocument({
+  const loadingTask = pdfjsLib.getDocument({
     data: data.slice(0),
-    isEvalSupported: false,
     // Required for non-embedded standard fonts and named-CMap CID fonts;
     // without them those glyphs render as blank boxes.
     standardFontDataUrl: `${assetBase}standard_fonts/`,
@@ -90,7 +89,8 @@ export async function renderClusterPreviews(
     // non-embedded fonts (Helvetica, ...) as blank .notdef boxes.
     disableFontFace: true,
     useSystemFonts: false,
-  }).promise;
+  });
+  const doc = await loadingTask.promise;
 
   const overlay = createOverlayWorker();
   try {
@@ -137,7 +137,7 @@ export async function renderClusterPreviews(
     return previews;
   } finally {
     overlay.terminate();
-    await doc.destroy();
+    await loadingTask.destroy();
   }
 }
 
